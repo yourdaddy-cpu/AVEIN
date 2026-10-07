@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
+using LLama.Native;
 using LLama.Sampling;
 
 namespace AVEIN
@@ -14,6 +15,7 @@ namespace AVEIN
         private LLamaContext _context;
         private InteractiveExecutor _executor;
         private string _loadedModelName;
+        private static bool _backendConfigured = false;
 
         private const string OwnerName = "Onyx";
 
@@ -28,9 +30,35 @@ namespace AVEIN
             return files.Length > 0 ? files[0] : null;
         }
 
+        private static void ConfigureBackendOnce()
+        {
+            if (_backendConfigured) return;
+            _backendConfigured = true;
+
+            try
+            {
+                // Point explicitly to the llama.dll shipped in the app folder
+                var llamaPath = Path.Combine(AppContext.BaseDirectory, "llama.dll");
+                if (File.Exists(llamaPath))
+                {
+                    NativeLibraryConfig.LLama.WithLibrary(llamaPath);
+                }
+
+                // Skip environment compatibility checks (avoids false CUDA detection)
+                NativeLibraryConfig.All.SkipCheck(true);
+            }
+            catch
+            {
+                // ignore — fall back to auto-detection
+            }
+        }
+
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
+
+            ConfigureBackendOnce();
+
             if (_loadedModelName == modelName && _executor != null) return true;
 
             var path = ModelFilePath(modelName);
