@@ -1,0 +1,20 @@
+{
+  "theme": "default",
+  "modules": {
+    "chat": true,
+    "settings": true,
+    "plugins": true,
+    "microphone": false,
+    "local-ai": true,
+    "api": false,
+    "memory": true,
+    "vision": false,
+    "automation": false,
+    "web-search": false
+  },
+  "window": {
+    "width": 1000,
+    "height": 650,
+    "maximized": false
+  }
+}
