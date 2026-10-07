@@ -1,0 +1,39 @@
+<UserControl x:Class="AVEIN.Views.PluginsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Plugins" FontSize="20" FontWeight="Bold"
+                   Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,16" />
+
+        <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="16" Margin="0,0,0,16">
+            <StackPanel>
+                <CheckBox x:Name="WebSearchToggle" Content="Enable Web Search (needs internet)"
+                          Checked="WebSearchToggle_Changed" Unchecked="WebSearchToggle_Changed"
+                          Foreground="{DynamicResource PrimaryTextBrush}" />
+                <TextBlock Text="When on, AVEIN can look things up online before answering. Off by default - your chats stay fully local unless you enable this."
+                           Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+                           FontSize="12" Margin="0,6,0,0" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8">
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top" Text="Activity Log" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,8" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="ActivityLog" />
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>
