@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
-using LLama.Native;
+using LLama.Sampling;
 
 namespace AVEIN
 {
@@ -16,7 +16,6 @@ namespace AVEIN
         private string _loadedModelName;
 
         private const string OwnerName = "Onyx";
-        private static bool _backendConfigured = false;
 
         private static string ModelFolder(string modelName) =>
             Path.Combine(AppContext.BaseDirectory, "models", modelName);
@@ -32,19 +31,6 @@ namespace AVEIN
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
-
-            // Force CUDA backend and skip the compatibility check that triggers the bug
-            if (!_backendConfigured)
-            {
-                try
-                {
-                    NativeLibraryConfig.All.WithCuda(true);
-                    NativeLibraryConfig.All.SkipCheck(true);
-                }
-                catch { }
-                _backendConfigured = true;
-            }
-
             if (_loadedModelName == modelName && _executor != null) return true;
 
             var path = ModelFilePath(modelName);
@@ -65,7 +51,7 @@ namespace AVEIN
                 {
                     ContextSize = 4096,
                     Threads = 6,
-                    GpuLayerCount = 20
+                    GpuLayerCount = 0
                 };
 
                 _model = LLamaWeights.LoadFromFile(parameters);
@@ -90,9 +76,12 @@ namespace AVEIN
             var inferenceParams = new InferenceParams
             {
                 MaxTokens = maxTokens,
-                Temperature = temperature,
-                RepeatPenalty = 1.5f,
-                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" }
+                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" },
+                SamplingPipeline = new DefaultSamplingPipeline
+                {
+                    Temperature = temperature,
+                    RepeatPenalty = 1.5f
+                }
             };
 
             var result = "";
