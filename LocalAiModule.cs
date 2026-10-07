@@ -37,26 +37,18 @@ namespace AVEIN
 
             try
             {
-                // Point explicitly to the llama.dll shipped in the app folder
-                var llamaPath = Path.Combine(AppContext.BaseDirectory, "llama.dll");
-                if (File.Exists(llamaPath))
-                {
-                    NativeLibraryConfig.LLama.WithLibrary(llamaPath);
-                }
-
-                // Skip environment compatibility checks (avoids false CUDA detection)
-                NativeLibraryConfig.All.SkipCheck(true);
+                NativeLibraryConfig.All
+                    .WithCuda(true)
+                    .WithAutoFallback(false)
+                    .SkipCheck(true)
+                    .WithLogs(LLamaLogLevel.Warning);
             }
-            catch
-            {
-                // ignore — fall back to auto-detection
-            }
+            catch { }
         }
 
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
-
             ConfigureBackendOnce();
 
             if (_loadedModelName == modelName && _executor != null) return true;
@@ -79,7 +71,7 @@ namespace AVEIN
                 {
                     ContextSize = 4096,
                     Threads = 6,
-                    GpuLayerCount = 0
+                    GpuLayerCount = 20
                 };
 
                 _model = LLamaWeights.LoadFromFile(parameters);
