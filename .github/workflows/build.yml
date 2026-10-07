@@ -20,11 +20,11 @@ jobs:
       - name: Restore
         run: dotnet restore AVEIN.csproj
 
-      - name: Publish (framework-dependent, keeps all native DLLs)
-        run: dotnet publish AVEIN.csproj -c Release -r win-x64 --self-contained false -o build_output
+      - name: Publish (self-contained, folder)
+        run: dotnet publish AVEIN.csproj -c Release -r win-x64 --self-contained true -o build_output
 
       - name: Verify output
-        run: dir build_output
+        run: dir build_output\runtimes\win-x64\native
 
       - name: Upload built app
         uses: actions/upload-artifact@v4
