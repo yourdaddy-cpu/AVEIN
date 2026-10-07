@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
+using LLama.Native;
 
 namespace AVEIN
 {
@@ -13,6 +14,7 @@ namespace AVEIN
         private LLamaContext _context;
         private InteractiveExecutor _executor;
         private string _loadedModelName;
+        private static bool _backendConfigured = false;
 
         private const string OwnerName = "Onyx";
 
@@ -30,6 +32,14 @@ namespace AVEIN
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
+
+            // Configure the native backend once on first use
+            if (!_backendConfigured)
+            {
+                NativeLibraryConfig.All.WithCuda(true);
+                _backendConfigured = true;
+            }
+
             if (_loadedModelName == modelName && _executor != null) return true;
 
             var path = ModelFilePath(modelName);
