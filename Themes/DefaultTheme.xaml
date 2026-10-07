@@ -42,19 +42,22 @@
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
-    <!-- Top Navigation Button Style (tabs) -->
+    <!-- Big centered top navigation button (Chat / Dex) -->
     <Style x:Key="TopNavButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
         <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
-        <Setter Property="FontSize" Value="14" />
-        <Setter Property="Padding" Value="16,10" />
+        <Setter Property="FontSize" Value="22" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="28,14" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="0" Padding="{TemplateBinding Padding}" BorderThickness="0,0,0,2" BorderBrush="Transparent">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="0"
+                            Padding="{TemplateBinding Padding}"
+                            BorderThickness="0,0,0,3" BorderBrush="Transparent">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -69,11 +72,13 @@
 
     <Style x:Key="TopNavButtonActiveStyle" TargetType="Button" BasedOn="{StaticResource TopNavButtonStyle}">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}" CornerRadius="0" Padding="{TemplateBinding Padding}" BorderThickness="0,0,0,2" BorderBrush="{DynamicResource AccentBrush}">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="0"
+                            Padding="{TemplateBinding Padding}"
+                            BorderThickness="0,0,0,3" BorderBrush="{DynamicResource AccentBrush}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                 </ControlTemplate>
