@@ -19,7 +19,7 @@
             <StackPanel Grid.Column="0">
                 <TextBlock Text="Aven Dex" FontSize="20" FontWeight="Bold"
                            Foreground="{DynamicResource PrimaryTextBrush}" />
-                <TextBlock Text="Autonomous coding agent — thinks, acts, observes, repeats"
+                <TextBlock Text="Autonomous coding agent — reads, writes, and runs commands"
                            FontSize="12"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            Margin="0,2,0,0" />
