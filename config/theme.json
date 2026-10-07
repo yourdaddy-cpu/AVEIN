@@ -1,0 +1,10 @@
+{
+  "name": "Clean Light",
+  "background": "#F7F8FA",
+  "surface": "#FFFFFF",
+  "primaryText": "#1B1D21",
+  "secondaryText": "#6B7280",
+  "accent": "#4F6EF7",
+  "border": "#E5E7EB",
+  "sidebarBackground": "#FFFFFF"
+}
