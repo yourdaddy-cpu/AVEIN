@@ -51,10 +51,10 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Top Navigation Bar -->
+            <!-- Top Navigation Bar — Chat and Dex, centered, big bold -->
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
-                    Background="{DynamicResource SurfaceBrush}">
-                <StackPanel Orientation="Horizontal" Margin="24,0,0,0">
+                    Background="{DynamicResource SurfaceBrush}" Padding="0,10,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <Button x:Name="NavChatButton" Content="Chat" Click="NavChatButton_Click"
                             Style="{StaticResource TopNavButtonActiveStyle}" />
                     <Button x:Name="NavDexButton" Content="Dex" Click="NavDexButton_Click"
