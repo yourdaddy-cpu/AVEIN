@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
-using LLama.Native;
+using LLama.Sampling;
 
 namespace AVEIN
 {
@@ -14,7 +14,6 @@ namespace AVEIN
         private LLamaContext _context;
         private InteractiveExecutor _executor;
         private string _loadedModelName;
-        private static bool _backendConfigured = false;
 
         private const string OwnerName = "Onyx";
 
@@ -32,13 +31,6 @@ namespace AVEIN
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
-
-            // Configure the native backend once on first use
-            if (!_backendConfigured)
-            {
-                NativeLibraryConfig.All.WithCuda(true);
-                _backendConfigured = true;
-            }
 
             if (_loadedModelName == modelName && _executor != null) return true;
 
@@ -74,9 +66,12 @@ namespace AVEIN
             var inferenceParams = new InferenceParams
             {
                 MaxTokens = maxTokens,
-                Temperature = 0.3f,
-                RepeatPenalty = 1.5f,
-                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" }
+                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" },
+                SamplingPipeline = new DefaultSamplingPipeline
+                {
+                    Temperature = 0.3f,
+                    RepeatPenalty = 1.5f
+                }
             };
 
             var result = "";
