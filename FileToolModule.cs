@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,7 +13,7 @@ namespace AVEIN
         public static event Action<string> ActivityLogged;
 
         private static readonly string[] AllowedExtensions =
-            { ".txt", ".md", ".json", ".csv", ".log", ".html", ".css", ".xml" };
+            { ".txt", ".md", ".json", ".csv", ".log", ".html", ".css", ".xml", ".js", ".py", ".cs", ".xaml" };
 
         private static string SandboxFolder =>
             Path.Combine(AppContext.BaseDirectory, "AVEIN-Files");
@@ -80,6 +81,9 @@ namespace AVEIN
 
             try
             {
+                if (!Directory.Exists(SandboxFolder))
+                    Directory.CreateDirectory(SandboxFolder);
+
                 var targetDir = string.IsNullOrEmpty(safeFolder)
                     ? SandboxFolder
                     : Path.Combine(SandboxFolder, SanitizePath(safeFolder));
@@ -92,12 +96,51 @@ namespace AVEIN
 
                 File.WriteAllText(fullPath, formattedContent);
                 Log("Created file: " + safeName);
-                return $"Created {safeName} inside the AVEIN-Files folder.";
+                return $"Created {safeName} inside the AVEIN-Files folder. Open it from: {fullPath}";
             }
             catch (Exception ex)
             {
                 Log("File creation failed: " + ex.Message);
                 return "Couldn't create that file: " + ex.Message;
+            }
+        }
+
+        public static string CreateZip(string zipFileName, string sourceFolder = null)
+        {
+            try
+            {
+                var safeName = Path.GetFileName(zipFileName);
+                if (!safeName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    safeName += ".zip";
+
+                var sourcePath = string.IsNullOrEmpty(sourceFolder)
+                    ? SandboxFolder
+                    : Path.Combine(SandboxFolder, SanitizePath(sourceFolder));
+
+                if (!Directory.Exists(sourcePath))
+                {
+                    Log("Zip source folder not found: " + sourcePath);
+                    return $"Source folder not found. Create some files first, then zip them.";
+                }
+
+                if (!Directory.Exists(SandboxFolder))
+                    Directory.CreateDirectory(SandboxFolder);
+
+                var destPath = Path.Combine(SandboxFolder, safeName);
+
+                if (File.Exists(destPath))
+                    File.Delete(destPath);
+
+                ZipFile.CreateFromDirectory(sourcePath, destPath, CompressionLevel.Fastest, false);
+
+                var info = new FileInfo(destPath);
+                Log($"Created zip file: {safeName} ({info.Length} bytes)");
+                return $"Successfully created '{safeName}' inside AVEIN-Files ({info.Length} bytes). Location: {destPath}";
+            }
+            catch (Exception ex)
+            {
+                Log("Zip creation failed: " + ex.Message);
+                return "Couldn't create the zip file: " + ex.Message;
             }
         }
 
