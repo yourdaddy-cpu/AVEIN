@@ -7,6 +7,9 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AssemblyName>AVEIN</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
 
   <ItemGroup>
