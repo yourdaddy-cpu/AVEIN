@@ -13,6 +13,7 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
+        <!-- Left Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
             <DockPanel LastChildFill="True" Margin="0,0,0,16">
@@ -25,21 +26,17 @@
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Top" Margin="10,0">
-                    <Button x:Name="NavChatButton" Content="Chat" Click="NavChatButton_Click"
-                            Style="{StaticResource NavButtonActiveStyle}" Margin="0,0,0,4" />
-                    <Button x:Name="NavDexButton" Content="Aven Dex" Click="NavDexButton_Click"
-                            Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                     <Button x:Name="NavMemoryButton" Content="Memory" Click="NavMemoryButton_Click"
                             Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                     <Button x:Name="NavPluginsButton" Content="Plugins" Click="NavPluginsButton_Click"
                             Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                     <Button x:Name="NavSettingsButton" Content="Settings" Click="NavSettingsButton_Click"
                             Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
+                    <Button x:Name="NavAboutButton" Content="About" Click="NavAboutButton_Click"
+                            Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Bottom" Margin="10,0">
-                    <Button x:Name="NavAboutButton" Content="About" Click="NavAboutButton_Click"
-                            Style="{StaticResource NavButtonStyle}" />
                     <TextBlock Text="v1.0" FontSize="10" Margin="16,10,0,0"
                                Foreground="{DynamicResource SecondaryTextBrush}" />
                 </StackPanel>
@@ -47,6 +44,26 @@
             </DockPanel>
         </Border>
 
-        <ContentControl x:Name="MainContent" Grid.Column="1" Margin="24" />
+        <!-- Right Side (Top Nav + Content) -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Top Navigation Bar -->
+            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"
+                    Background="{DynamicResource SurfaceBrush}">
+                <StackPanel Orientation="Horizontal" Margin="24,0,0,0">
+                    <Button x:Name="NavChatButton" Content="Chat" Click="NavChatButton_Click"
+                            Style="{StaticResource TopNavButtonActiveStyle}" />
+                    <Button x:Name="NavDexButton" Content="Dex" Click="NavDexButton_Click"
+                            Style="{StaticResource TopNavButtonStyle}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Main Content Area -->
+            <ContentControl x:Name="MainContent" Grid.Row="1" Margin="24" />
+        </Grid>
     </Grid>
 </Window>
