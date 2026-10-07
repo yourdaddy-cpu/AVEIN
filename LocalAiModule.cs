@@ -36,7 +36,7 @@ namespace AVEIN
             var path = ModelFilePath(modelName);
             if (path == null)
             {
-                error = $"({modelName} model file not found in models/{modelName}/ - make sure it's copied there)";
+                error = $"({modelName} model file not found in models/{modelName}/)";
                 return false;
             }
 
@@ -46,7 +46,7 @@ namespace AVEIN
 
             var parameters = new ModelParams(path)
             {
-                ContextSize = 2048,
+                ContextSize = 4096,
                 Threads = 6,
                 GpuLayerCount = 20
             };
@@ -58,7 +58,7 @@ namespace AVEIN
             return true;
         }
 
-        private async Task<string> GenerateRawAsync(string modelName, string prompt, int maxTokens)
+        private async Task<string> GenerateRawAsync(string modelName, string prompt, int maxTokens, float temperature)
         {
             if (!EnsureLoaded(modelName, out var error)) return error;
 
@@ -68,17 +68,25 @@ namespace AVEIN
                 AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" },
                 SamplingPipeline = new DefaultSamplingPipeline
                 {
-                    Temperature = 0.3f,
+                    Temperature = temperature,
                     RepeatPenalty = 1.5f
                 }
             };
 
             var result = "";
             await foreach (var text in _executor.InferAsync(prompt, inferenceParams))
-            {
                 result += text;
-            }
+
             return CleanUp(result);
+        }
+
+        /// <summary>
+        /// Raw call with a custom system prompt. Used by Aven Dex agent.
+        /// </summary>
+        public async Task<string> AskRawAsync(string systemPrompt, string userMessage, int maxTokens = 900, float temperature = 0.2f)
+        {
+            var prompt = $"<|im_start|>system<|im_sep|>{systemPrompt}<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
+            return await GenerateRawAsync("Phi4-mini", prompt, maxTokens, temperature);
         }
 
         public async Task<string> AskAsync(string userMessage, string modelName = "Phi4-mini", bool deepThink = false)
@@ -88,13 +96,9 @@ namespace AVEIN
 
             var lower = userMessage.ToLowerInvariant().Trim();
 
-            // Open windows query
             if (lower.Contains("what") && (lower.Contains("open") || lower.Contains("running")) && (lower.Contains("window") || lower.Contains("app") || lower.Contains("screen")))
-            {
                 return "Here's what's currently open:\n" + FileToolModule.GetOpenWindowsList();
-            }
 
-            // ZIP creation
             if (lower.Contains("zip") || lower.Contains("compress") || lower.Contains("archive"))
             {
                 if (lower.Contains("create") || lower.Contains("make") || lower.Contains("build"))
@@ -105,76 +109,54 @@ namespace AVEIN
                 }
             }
 
-            // Minecraft / mod / compiled program refusals
             if ((lower.Contains("minecraft") || lower.Contains(" mod ") || lower.Contains("compiled program")) &&
                 (lower.Contains("create") || lower.Contains("make")))
             {
-                return "I can create plain text-based files (.txt, .md, .json, .csv, .log, .html, .css, .xml, .js, .py, .cs) and .zip archives of them. I can't build compiled programs or Minecraft mods.";
+                return "I can create plain text-based files (.txt, .md, .json, .csv, .log, .html, .css, .xml, .js, .py, .cs) and .zip archives of them.";
             }
 
-            // File creation with smart extension detection
             if ((lower.Contains("create") || lower.Contains("make") || lower.Contains("write")) && lower.Contains("file"))
             {
                 var extMatch = Regex.Match(userMessage, @"[a-zA-Z0-9_\-]+\.[a-zA-Z]{1,5}");
 
                 string fileName;
-                if (extMatch.Success)
-                {
-                    fileName = extMatch.Value;
-                }
-                else if (lower.Contains("html"))
-                    fileName = "note.html";
-                else if (lower.Contains("json"))
-                    fileName = "note.json";
-                else if (lower.Contains("css"))
-                    fileName = "note.css";
-                else if (lower.Contains("javascript") || lower.Contains("js file"))
-                    fileName = "note.js";
-                else if (lower.Contains("python") || lower.Contains("py file"))
-                    fileName = "note.py";
-                else if (lower.Contains("markdown") || lower.Contains("md file"))
-                    fileName = "note.md";
-                else
-                    fileName = "note.txt";
+                if (extMatch.Success) fileName = extMatch.Value;
+                else if (lower.Contains("html")) fileName = "note.html";
+                else if (lower.Contains("json")) fileName = "note.json";
+                else if (lower.Contains("css")) fileName = "note.css";
+                else if (lower.Contains("javascript") || lower.Contains("js file")) fileName = "note.js";
+                else if (lower.Contains("python") || lower.Contains("py file")) fileName = "note.py";
+                else if (lower.Contains("markdown") || lower.Contains("md file")) fileName = "note.md";
+                else fileName = "note.txt";
 
                 var ext = Path.GetExtension(fileName).ToLowerInvariant();
 
-                var contentPrompt = $"<|im_start|>system<|im_sep|>You are a file content generator. The user wants to create a file named '{fileName}' ({ext}). Write ONLY the raw content that should go inside this file. Output ONLY the raw file content with no explanations, no greetings, no markdown fences, no intro sentences, no outro. For HTML files: write complete valid HTML starting with <!DOCTYPE html>. For JSON: write only valid JSON. For code files: write only code. Use actual line breaks. Do not write the characters \\n.<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
+                var contentPrompt = $"<|im_start|>system<|im_sep|>You are a file content generator. The user wants to create a file named '{fileName}' ({ext}). Write ONLY the raw content that should go inside this file. Output ONLY the raw file content with no explanations, no greetings, no markdown fences. For HTML files: write complete valid HTML starting with <!DOCTYPE html>. Use actual line breaks.<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
 
-                var generatedContent = await GenerateRawAsync(modelName, contentPrompt, 800);
-
+                var generatedContent = await GenerateRawAsync(modelName, contentPrompt, 800, 0.3f);
                 if (string.IsNullOrWhiteSpace(generatedContent))
                     generatedContent = "(The AI could not generate content for this file.)";
 
                 return FileToolModule.CreateFile(fileName, generatedContent);
             }
 
-            // List files
             if (lower.Contains("what files") || lower.Contains("list files") || lower.Contains("list my files") || lower.Contains("show files"))
-            {
                 return "Files in AVEIN-Files:\n" + FileToolModule.ListSandboxFiles();
-            }
 
-            // Who made you
             if (lower.Contains("who made you") || lower.Contains("who created you") || lower.Contains("who built you") || lower.Contains("who is your creator"))
-            {
                 return $"I was created by {OwnerName}, as part of the AVEIN project.";
-            }
 
-            // Standard chat with system prompt
             var systemPrompt = $"You are {modelName}, a helpful assistant created by {OwnerName} as part of the AVEIN project. " +
                 "STRICT RULES:\n" +
                 "1. Always reply in English, be concise and factual.\n" +
-                "2. Never make up facts, dates, numbers, names, or events. If you are not sure, say 'I am not sure'.\n" +
+                "2. Never make up facts. If you are not sure, say 'I am not sure'.\n" +
                 "3. If search results are provided, use ONLY that information.\n" +
-                "4. Never claim you searched the web unless search results are literally shown to you below.\n" +
+                "4. Never claim you searched the web unless search results are literally shown to you.\n" +
                 "5. Never repeat words or phrases.\n" +
-                "6. Do not invent fake tables, fake weather data, or fake statistics.\n" +
-                $"7. If asked who made you, say {OwnerName}.\n" +
-                "8. When asked to create files, output ONLY raw content - no explanations, no markdown fences.";
+                $"6. If asked who made you, say {OwnerName}.";
 
             if (deepThink)
-                systemPrompt += " Think through this step by step. Put reasoning inside <thinking></thinking> tags, then final answer inside <answer></answer> tags.";
+                systemPrompt += " Think step by step. Put reasoning inside <thinking></thinking> tags, then final answer inside <answer></answer> tags.";
 
             var searchUsed = false;
             if (App.Config.IsModuleEnabled("web-search"))
@@ -189,17 +171,14 @@ namespace AVEIN
                     systemPrompt += " Real search result: " + searchResult;
                     searchUsed = true;
                 }
-                else
-                {
-                    systemPrompt += " No search result was found. Say so honestly.";
-                }
+                else systemPrompt += " No search result was found. Say so honestly.";
             }
 
             var prompt = $"<|im_start|>system<|im_sep|>{systemPrompt}<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
-            var answer = await GenerateRawAsync(modelName, prompt, deepThink ? 500 : 300);
+            var answer = await GenerateRawAsync(modelName, prompt, deepThink ? 500 : 300, 0.3f);
 
             if (App.Config.IsModuleEnabled("web-search"))
-                answer += searchUsed ? "\n\n[used live web search]" : "\n\n[no web search result used - answered from own knowledge]";
+                answer += searchUsed ? "\n\n[used live web search]" : "\n\n[no web search result used]";
 
             return answer;
         }
