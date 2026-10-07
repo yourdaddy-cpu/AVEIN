@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -27,14 +28,10 @@ namespace AVEIN.Views
         {
             MicButton.Content = "Listening...";
             MicButton.IsEnabled = false;
-
             var heard = await AVEIN.VoiceModule.ListenOnceAsync();
-
             MicButton.Content = "Mic";
             MicButton.IsEnabled = true;
-
-            if (!string.IsNullOrWhiteSpace(heard))
-                InputBox.Text = heard;
+            if (!string.IsNullOrWhiteSpace(heard)) InputBox.Text = heard;
         }
 
         private void NewChatButton_Click(object sender, RoutedEventArgs e)
@@ -47,7 +44,6 @@ namespace AVEIN.Views
         {
             var session = AVEIN.HistoryStore.GetSession(sessionId);
             if (session == null) return;
-
             _currentSessionId = sessionId;
             MessageList.Children.Clear();
             foreach (var msg in session.Messages)
@@ -80,39 +76,77 @@ namespace AVEIN.Views
 
             var modelName = CurrentModelName;
             var deepThink = DeepThinkToggle.IsChecked == true;
-            AddMessage(modelName, deepThink ? "thinking carefully..." : "thinking...");
+            var placeholder = AddPlaceholder(modelName, deepThink ? "thinking carefully..." : "thinking...");
 
             string reply;
             try
             {
                 reply = await _ai.AskAsync(text, modelName, deepThink);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                reply = "(error: " + ex.Message + ")";
+                reply = BuildFullError(ex);
             }
 
-            MessageList.Children.RemoveAt(MessageList.Children.Count - 1);
+            MessageList.Children.Remove(placeholder);
             AddMessage(modelName, reply);
             AVEIN.HistoryStore.AppendMessage(_currentSessionId, modelName, reply);
 
             if (SpeakToggle.IsChecked == true)
             {
-                var spoken = Regex.Replace(reply, @"</?(thinking|answer)>", "");
+                var spoken = StripAllTags(reply);
                 spoken = Regex.Replace(spoken, @"\[used live web search\]|\[no web search result used.*?\]", "");
                 AVEIN.VoiceModule.Speak(spoken.Trim());
             }
         }
 
+        private string BuildFullError(Exception ex)
+        {
+            var msg = "(error: " + (ex.Message ?? "(no message)") + ")";
+            var inner = ex.InnerException;
+            int depth = 0;
+            while (inner != null && depth < 3)
+            {
+                msg += "\n  → " + (inner.GetType().Name) + ": " + (inner.Message ?? "(no message)");
+                inner = inner.InnerException;
+                depth++;
+            }
+            return msg;
+        }
+
+        private TextBlock AddPlaceholder(string sender, string text)
+        {
+            var tb = new TextBlock
+            {
+                Text = $"{sender}: {text}",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 10),
+                FontStyle = FontStyles.Italic,
+                Foreground = (Brush)FindResource("SecondaryTextBrush")
+            };
+            MessageList.Children.Add(tb);
+            return tb;
+        }
+
         private void AddMessage(string sender, string text)
         {
-            var thinkingMatch = Regex.Match(text, @"<thinking>(.*?)</?thinking>\s*<answer>(.*?)</?answer>", RegexOptions.Singleline);
+            string reasoning = null;
+            string answer = null;
 
-            if (thinkingMatch.Success)
+            var thinkMatch = Regex.Match(text, @"<thinking>(.*?)(?:</thinking>|$)", RegexOptions.Singleline);
+            var ansMatch = Regex.Match(text, @"<answer>(.*?)(?:</answer>|$)", RegexOptions.Singleline);
+
+            if (thinkMatch.Success) reasoning = thinkMatch.Groups[1].Value.Trim();
+            if (ansMatch.Success) answer = ansMatch.Groups[1].Value.Trim();
+
+            if (answer == null && reasoning == null)
             {
-                var reasoning = thinkingMatch.Groups[1].Value.Trim();
-                var answer = thinkingMatch.Groups[2].Value.Trim();
+                AddPlainMessage(sender, StripAllTags(text));
+                return;
+            }
 
+            if (!string.IsNullOrWhiteSpace(reasoning))
+            {
                 MessageList.Children.Add(new TextBlock
                 {
                     Text = $"{sender} (reasoning): {reasoning}",
@@ -122,25 +156,29 @@ namespace AVEIN.Views
                     FontSize = 12,
                     Foreground = (Brush)FindResource("SecondaryTextBrush")
                 });
-
-                MessageList.Children.Add(new TextBlock
-                {
-                    Text = $"{sender}: {answer}",
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(0, 0, 0, 10),
-                    Foreground = (Brush)FindResource("PrimaryTextBrush")
-                });
-                return;
             }
 
-            var fallbackText = Regex.Replace(text, @"</?(thinking|answer)>", "").Trim();
+            var final = !string.IsNullOrWhiteSpace(answer) ? answer : StripAllTags(text);
+            AddPlainMessage(sender, final);
+        }
+
+        private void AddPlainMessage(string sender, string text)
+        {
             MessageList.Children.Add(new TextBlock
             {
-                Text = $"{sender}: {fallbackText}",
+                Text = $"{sender}: {text}",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 10),
                 Foreground = (Brush)FindResource("PrimaryTextBrush")
             });
+        }
+
+        private static string StripAllTags(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            text = Regex.Replace(text, @"</?thinking>", "", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"</?answer>", "", RegexOptions.IgnoreCase);
+            return text.Trim();
         }
     }
 }
