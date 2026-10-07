@@ -10,7 +10,6 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -20,7 +19,7 @@
             <StackPanel Grid.Column="0">
                 <TextBlock Text="Aven Dex" FontSize="20" FontWeight="Bold"
                            Foreground="{DynamicResource PrimaryTextBrush}" />
-                <TextBlock Text="Your coding agent — reads, writes, and modifies project files"
+                <TextBlock Text="Autonomous coding agent — thinks, acts, observes, repeats"
                            FontSize="12"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            Margin="0,2,0,0" />
@@ -33,7 +32,6 @@
                     Padding="14,8" Cursor="Hand" VerticalAlignment="Center" />
         </Grid>
 
-        <!-- Project selector -->
         <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="8" Padding="12" Margin="0,0,0,12">
@@ -41,6 +39,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
@@ -56,41 +55,31 @@
                          IsReadOnly="True"
                          Text="(no project selected — click Browse)" />
 
-                <Button Grid.Column="2" Content="Browse" Click="BrowseProject_Click"
+                <ComboBox x:Name="PermissionModeBox" Grid.Column="2"
+                          Width="140" Margin="8,0,0,0"
+                          SelectedIndex="0"
+                          SelectionChanged="PermissionMode_Changed">
+                    <ComboBoxItem Content="Ask Me" />
+                    <ComboBoxItem Content="Auto Edits" />
+                    <ComboBoxItem Content="Plan Only" />
+                    <ComboBoxItem Content="Full Auto" />
+                </ComboBox>
+
+                <Button Grid.Column="3" Content="Browse" Click="BrowseProject_Click"
                         Margin="8,0,0,0" Padding="14,6"
                         Background="{DynamicResource AccentBrush}" Foreground="White"
                         BorderThickness="0" Cursor="Hand" />
             </Grid>
         </Border>
 
-        <!-- Chat area -->
         <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="8" ClipToBounds="True">
-            <Grid>
-                <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="MessageList" />
-                </ScrollViewer>
-
-                <Grid HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                      Width="70" Height="70" Margin="0,0,14,14"
-                      IsHitTestVisible="False" Opacity="0.55">
-                    <Ellipse Width="70" Height="70">
-                        <Ellipse.Fill>
-                            <RadialGradientBrush>
-                                <GradientStop Color="#553B82F6" Offset="0.0" />
-                                <GradientStop Color="#33A855F7" Offset="0.55" />
-                                <GradientStop Color="#00000000" Offset="1.0" />
-                            </RadialGradientBrush>
-                        </Ellipse.Fill>
-                    </Ellipse>
-                    <Ellipse Width="46" Height="46" Stroke="#66E8E3FF" StrokeThickness="1.2" />
-                    <Ellipse Width="18" Height="18" Fill="Black" />
-                </Grid>
-            </Grid>
+            <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="MessageList" />
+            </ScrollViewer>
         </Border>
 
-        <!-- Input -->
         <Grid Grid.Row="3" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
