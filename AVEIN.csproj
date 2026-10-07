@@ -11,20 +11,18 @@
     <Platforms>x64</Platforms>
     <Prefer32Bit>false</Prefer32Bit>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 
-    <!-- Core LLamaSharp: exclude its transitive CPU backend pull-in -->
-    <PackageReference Include="LLamaSharp" Version="0.25.0">
-      <ExcludeAssets>runtime;native</ExcludeAssets>
-    </PackageReference>
+    <!-- LLamaSharp managed assembly — MUST have runtime assets included -->
+    <PackageReference Include="LLamaSharp" Version="0.25.0" />
 
-    <!-- Only CUDA backend; exclude CPU backend's native assets entirely -->
+    <!-- Only the CUDA backend provides native DLLs -->
     <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" />
 
+    <!-- Explicitly suppress the CPU backend's native files -->
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0">
       <ExcludeAssets>runtime;native;build;buildTransitive</ExcludeAssets>
       <PrivateAssets>all</PrivateAssets>
