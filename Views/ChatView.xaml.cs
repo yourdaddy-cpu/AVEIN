@@ -50,14 +50,7 @@ namespace AVEIN.Views
                 AddMessage(msg.Sender, msg.Text);
         }
 
-        private string CurrentModelName
-        {
-            get
-            {
-                var selected = ModelSelector?.SelectedItem as ComboBoxItem;
-                return selected?.Content?.ToString() ?? "Phi4-mini";
-            }
-        }
+        private string CurrentModelName => "Phi4-mini";
 
         private async void SendMessage()
         {
