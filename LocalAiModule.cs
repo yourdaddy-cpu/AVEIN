@@ -40,12 +40,7 @@ namespace AVEIN
                 NativeLibraryConfig.All
                     .WithCuda(true)
                     .WithAutoFallback(false)
-                    .SkipCheck(true)
-                    .WithLogCallback((level, message) =>
-                    {
-                        // Optional: log to console or debug output
-                        System.Diagnostics.Debug.WriteLine($"[llama {level}]: {message.TrimEnd('\n')}");
-                    });
+                    .SkipCheck(true);
             }
             catch { }
         }
