@@ -24,7 +24,7 @@ jobs:
         run: dotnet publish AVEIN.csproj -c Release -r win-x64 --self-contained true -o build_output
 
       - name: Verify output
-        run: dir build_output\runtimes\win-x64\native
+        run: dir build_output
 
       - name: Upload built app
         uses: actions/upload-artifact@v4
