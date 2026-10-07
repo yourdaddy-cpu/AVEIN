@@ -6,6 +6,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -14,18 +15,48 @@
 
         <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                CornerRadius="8" Padding="16" Margin="0,0,0,12">
             <StackPanel>
                 <CheckBox x:Name="WebSearchToggle" Content="Enable Web Search (needs internet)"
                           Checked="WebSearchToggle_Changed" Unchecked="WebSearchToggle_Changed"
                           Foreground="{DynamicResource PrimaryTextBrush}" />
-                <TextBlock Text="When on, AVEIN can look things up online before answering. Off by default - your chats stay fully local unless you enable this."
+                <TextBlock Text="When on, AVEIN can look things up online before answering. Off by default."
                            Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
                            FontSize="12" Margin="0,6,0,0" />
             </StackPanel>
         </Border>
 
         <Border Grid.Row="2" Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                CornerRadius="8" Padding="16" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="GitHub Connection" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,8" />
+                <TextBlock Text="Paste a GitHub Personal Access Token (classic) with 'repo' scope. Stored locally in config."
+                           Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+                           FontSize="12" Margin="0,0,0,8" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <PasswordBox x:Name="GitHubTokenBox" Grid.Column="0"
+                                 Padding="8,6" FontSize="13"
+                                 Background="{DynamicResource BackgroundBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    <Button Grid.Column="1" Content="Save" Click="SaveGitHubToken_Click"
+                            Margin="8,0,0,0" Padding="16,6"
+                            Background="{DynamicResource AccentBrush}" Foreground="White"
+                            BorderThickness="0" Cursor="Hand" />
+                </Grid>
+                <TextBlock x:Name="GitHubStatusText" FontSize="12"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" Margin="0,8,0,0" Text="Not connected." />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="3" Background="{DynamicResource SurfaceBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8">
             <DockPanel Margin="16">
                 <TextBlock DockPanel.Dock="Top" Text="Activity Log" FontWeight="SemiBold"
