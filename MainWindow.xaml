@@ -27,6 +27,8 @@
                 <StackPanel DockPanel.Dock="Top" Margin="10,0">
                     <Button x:Name="NavChatButton" Content="Chat" Click="NavChatButton_Click"
                             Style="{StaticResource NavButtonActiveStyle}" Margin="0,0,0,4" />
+                    <Button x:Name="NavDexButton" Content="Aven Dex" Click="NavDexButton_Click"
+                            Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                     <Button x:Name="NavMemoryButton" Content="Memory" Click="NavMemoryButton_Click"
                             Style="{StaticResource NavButtonStyle}" Margin="0,0,0,4" />
                     <Button x:Name="NavPluginsButton" Content="Plugins" Click="NavPluginsButton_Click"
