@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using LLama;
 using LLama.Common;
-using LLama.Sampling;
+using LLama.Native;
 
 namespace AVEIN
 {
@@ -16,6 +16,7 @@ namespace AVEIN
         private string _loadedModelName;
 
         private const string OwnerName = "Onyx";
+        private static bool _backendConfigured = false;
 
         private static string ModelFolder(string modelName) =>
             Path.Combine(AppContext.BaseDirectory, "models", modelName);
@@ -31,31 +32,55 @@ namespace AVEIN
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
+
+            // Force CUDA backend and skip the compatibility check that triggers the bug
+            if (!_backendConfigured)
+            {
+                try
+                {
+                    NativeLibraryConfig.All.WithCuda(true);
+                    NativeLibraryConfig.All.SkipCheck(true);
+                }
+                catch { }
+                _backendConfigured = true;
+            }
+
             if (_loadedModelName == modelName && _executor != null) return true;
 
             var path = ModelFilePath(modelName);
             if (path == null)
             {
-                error = $"({modelName} model file not found in models/{modelName}/)";
+                var tried = ModelFolder(modelName);
+                error = $"(model not found)\n  looked in: {tried}\n  put your .gguf file in that folder and restart.";
                 return false;
             }
 
-            _context?.Dispose();
-            _model?.Dispose();
-            _executor = null;
-
-            var parameters = new ModelParams(path)
+            try
             {
-                ContextSize = 4096,
-                Threads = 6,
-                GpuLayerCount = 20
-            };
+                _context?.Dispose();
+                _model?.Dispose();
+                _executor = null;
 
-            _model = LLamaWeights.LoadFromFile(parameters);
-            _context = _model.CreateContext(parameters);
-            _executor = new InteractiveExecutor(_context);
-            _loadedModelName = modelName;
-            return true;
+                var parameters = new ModelParams(path)
+                {
+                    ContextSize = 4096,
+                    Threads = 6,
+                    GpuLayerCount = 20
+                };
+
+                _model = LLamaWeights.LoadFromFile(parameters);
+                _context = _model.CreateContext(parameters);
+                _executor = new InteractiveExecutor(_context);
+                _loadedModelName = modelName;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = "(model load failed)\n  " + ex.GetType().Name + ": " + ex.Message;
+                if (ex.InnerException != null)
+                    error += "\n  → " + ex.InnerException.GetType().Name + ": " + ex.InnerException.Message;
+                return false;
+            }
         }
 
         private async Task<string> GenerateRawAsync(string modelName, string prompt, int maxTokens, float temperature)
@@ -65,12 +90,9 @@ namespace AVEIN
             var inferenceParams = new InferenceParams
             {
                 MaxTokens = maxTokens,
-                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" },
-                SamplingPipeline = new DefaultSamplingPipeline
-                {
-                    Temperature = temperature,
-                    RepeatPenalty = 1.5f
-                }
+                Temperature = temperature,
+                RepeatPenalty = 1.5f,
+                AntiPrompts = new System.Collections.Generic.List<string> { "<|im_end|>", "<|im_start|>" }
             };
 
             var result = "";
@@ -80,9 +102,6 @@ namespace AVEIN
             return CleanUp(result);
         }
 
-        /// <summary>
-        /// Raw call with a custom system prompt. Used by Aven Dex agent.
-        /// </summary>
         public async Task<string> AskRawAsync(string systemPrompt, string userMessage, int maxTokens = 900, float temperature = 0.2f)
         {
             var prompt = $"<|im_start|>system<|im_sep|>{systemPrompt}<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
