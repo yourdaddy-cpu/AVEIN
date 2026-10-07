@@ -17,7 +17,11 @@
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="LLamaSharp" Version="0.25.0" />
-    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cuda12" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0">
+      <ExcludeAssets>runtime;native;build;buildTransitive</ExcludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="System.Speech" Version="8.0.0" />
     <PackageReference Include="System.IO.Compression" Version="4.3.0" />
     <PackageReference Include="Octokit" Version="9.0.0" />
@@ -34,13 +38,18 @@
     </None>
   </ItemGroup>
 
-  <Target Name="CopyLlamaSharpNatives" AfterTargets="Publish">
-    <ItemGroup>
-      <LlamaNatives Include="$(NuGetPackageRoot)llamasharp.backend.cpu\0.25.0\runtimes\win-x64\native\**\*.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(LlamaNatives)"
-          DestinationFolder="$(PublishDir)runtimes\win-x64\native\%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
+  <ItemGroup>
+    <LlamaSharpCudaNatives Include="$(NuGetPackageRoot)llamasharp.backend.cuda12\0.25.0\runtimes\**\*.*" />
+  </ItemGroup>
+
+  <Target Name="CopyRuntimesFolderOnPublish" AfterTargets="Publish">
+    <Delete Files="$(PublishDir)llama.dll" />
+    <Delete Files="$(PublishDir)llava_shared.dll" />
+    <Delete Files="$(PublishDir)ggml.dll" />
+    <Delete Files="$(PublishDir)ggml-base.dll" />
+    <Delete Files="$(PublishDir)ggml-cpu.dll" />
+    <Delete Files="$(PublishDir)ggml-cuda.dll" />
+    <Copy SourceFiles="@(LlamaSharpCudaNatives)" DestinationFolder="$(PublishDir)\runtimes\%(RecursiveDir)" />
   </Target>
 
 </Project>
