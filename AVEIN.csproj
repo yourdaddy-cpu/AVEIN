@@ -1,35 +1,46 @@
-name: Build AVEIN
+<Project Sdk="Microsoft.NET.Sdk">
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>AVEIN</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <Prefer32Bit>false</Prefer32Bit>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
 
-jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="LLamaSharp" Version="0.25.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.25.0" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="System.IO.Compression" Version="4.3.0" />
+    <PackageReference Include="Octokit" Version="9.0.0" />
+  </ItemGroup>
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+  <ItemGroup>
+    <None Include="config\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>config\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+    <None Include="models\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>models\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
 
-      - name: Restore
-        run: dotnet restore AVEIN.csproj
+  <Target Name="CopyLlamaSharpNatives" AfterTargets="Publish">
+    <ItemGroup>
+      <LlamaNatives Include="$(NuGetPackageRoot)llamasharp.backend.cpu\0.25.0\runtimes\win-x64\native\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LlamaNatives)"
+          DestinationFolder="$(PublishDir)runtimes\win-x64\native\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 
-      - name: Publish (self-contained, folder)
-        run: dotnet publish AVEIN.csproj -c Release -r win-x64 --self-contained true -o build_output
-
-      - name: Verify output
-        run: dir build_output\runtimes\win-x64\native
-
-      - name: Upload built app
-        uses: actions/upload-artifact@v4
-        with:
-          name: AVEIN-app
-          path: build_output
-          if-no-files-found: error
-          retention-days: 30
+</Project>
