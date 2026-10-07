@@ -44,10 +44,19 @@ namespace AVEIN
         {
             MainContent.Content = view;
 
-            foreach (var button in new[] { NavChatButton, NavDexButton, NavMemoryButton, NavPluginsButton, NavSettingsButton, NavAboutButton })
-                button.Style = (Style)FindResource("NavButtonStyle");
+            // Reset all styles
+            NavChatButton.Style = (Style)FindResource("TopNavButtonStyle");
+            NavDexButton.Style = (Style)FindResource("TopNavButtonStyle");
+            NavMemoryButton.Style = (Style)FindResource("NavButtonStyle");
+            NavPluginsButton.Style = (Style)FindResource("NavButtonStyle");
+            NavSettingsButton.Style = (Style)FindResource("NavButtonStyle");
+            NavAboutButton.Style = (Style)FindResource("NavButtonStyle");
 
-            activeButton.Style = (Style)FindResource("NavButtonActiveStyle");
+            // Apply active style
+            if (activeButton == NavChatButton || activeButton == NavDexButton)
+                activeButton.Style = (Style)FindResource("TopNavButtonActiveStyle");
+            else
+                activeButton.Style = (Style)FindResource("NavButtonActiveStyle");
         }
 
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
