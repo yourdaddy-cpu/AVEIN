@@ -3,489 +3,335 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace AVEIN
 {
-    public enum DexPermissionMode
+    public enum DexActionType { ReadFile, WriteFile, EditFile, RunCmd, Todo, Done, Glob, Grep, ListDir, DeleteFile, MoveFile, Download, Git, WebFetch }
+    public enum DexPermissionMode { Default, AcceptEdits, Plan, Auto }
+
+    public sealed class DexAction
     {
-        Default,
-        AcceptEdits,
-        Plan,
-        Auto
+        public DexActionType Type { get; set; }
+        public string Arg { get; set; } = "";
+        public string Content { get; set; }
+        public string OldString { get; set; }
     }
 
     public sealed class AvenDexModule
     {
         private readonly LocalAiModule _ai;
-        private readonly string _projectRoot;
-
+        private readonly string _root;
         public static event Action<string> ActivityLogged;
         public event Action<string> StepReport;
-
         public DexPermissionMode PermissionMode { get; set; } = DexPermissionMode.Default;
 
-        private const int MaxIterations = 25;
-        private const int MaxContextChars = 24000;
-        private const int CompactTriggerChars = 20000;
+        private static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        private readonly StringBuilder _history = new StringBuilder();
+        private const int MaxIter = 25, MaxCtx = 24000, CompactAt = 20000;
 
-        private readonly StringBuilder _conversationHistory = new StringBuilder();
-
-        public AvenDexModule(LocalAiModule ai, string projectRoot)
-        {
-            _ai = ai;
-            _projectRoot = projectRoot;
-        }
-
-        // ─────────────────────────────────────────────────────────────
-        //  Main agent loop
-        // ─────────────────────────────────────────────────────────────
+        public AvenDexModule(LocalAiModule ai, string projectRoot) { _ai = ai; _root = projectRoot; }
 
         public async Task<string> ExecuteCodeTaskAsync(string userRequest)
         {
-            if (!Directory.Exists(_projectRoot))
-                return $"Project root not found: {_projectRoot}";
+            if (!Directory.Exists(_root)) return "Project root not found: " + _root;
+            _history.Clear();
+            Report($"Project: {_root}  |  Mode: {PermissionMode}");
 
-            _conversationHistory.Clear();
+            var sys = BuildSystemPrompt();
+            _history.AppendLine("TASK: " + userRequest + "\n");
 
-            Report($"Project: {_projectRoot}");
-            Report($"Permission mode: {PermissionMode}");
-
-            var fileTree = BuildFileTree(_projectRoot, 300);
-            var contextFiles = ReadContextFiles(_projectRoot);
-            var systemPrompt = BuildSystemPrompt(fileTree, contextFiles);
-
-            _conversationHistory.AppendLine("TASK: " + userRequest);
-            _conversationHistory.AppendLine();
-
-            string lastResponse = "";
-            bool taskDone = false;
-
-            for (int iter = 1; iter <= MaxIterations && !taskDone; iter++)
+            string last = "";
+            for (int i = 1; i <= MaxIter; i++)
             {
-                Report($"── Step {iter}/{MaxIterations} ──");
+                Report($"── Step {i}/{MaxIter} ──");
+                var hist = _history.ToString();
+                if (hist.Length > CompactAt) hist = "[earlier steps compacted]\n" + hist.Substring(hist.Length - CompactAt / 2);
+                if (hist.Length > MaxCtx) hist = hist.Substring(hist.Length - MaxCtx);
 
-                var history = _conversationHistory.ToString();
-                if (history.Length > CompactTriggerChars)
+                string resp;
+                try { resp = await _ai.AskRawAsync(sys, hist + "\n\nNext action(s)? End with [DONE] when finished.\n", 1200, 0.15f); }
+                catch (Exception ex) { return "(agent error: " + ex.Message + ")"; }
+                last = resp;
+
+                var said = Strip(resp);
+                if (!string.IsNullOrWhiteSpace(said)) Report("AI: " + Trunc(said, 500));
+
+                var actions = Parse(resp);
+                if (actions.Count == 0) { Report("(no actions)"); break; }
+                if (actions.Any(a => a.Type == DexActionType.Done)) { Report("[DONE]"); break; }
+
+                _history.AppendLine($"--- Turn {i} ---\nAI: {Trunc(said, 400)}");
+                foreach (var a in actions)
                 {
-                    history = CompactHistory(history);
-                    Report("[compact] History compacted.");
-                }
-                if (history.Length > MaxContextChars)
-                    history = history.Substring(history.Length - MaxContextChars);
-
-                var fullPrompt = history + "\n\nNow decide your next action(s). Use the tags. End with [DONE] when finished.\n";
-
-                string response;
-                try
-                {
-                    response = await _ai.AskRawAsync(systemPrompt, fullPrompt, 1200, 0.15f);
-                }
-                catch (Exception ex)
-                {
-                    return "(agent error: " + ex.Message + ")";
-                }
-
-                lastResponse = response;
-
-                var said = StripActionBlocks(response);
-                if (!string.IsNullOrWhiteSpace(said))
-                    Report("AI: " + Trim(said, 500));
-
-                var actions = ParseActions(response);
-                if (actions.Count == 0)
-                {
-                    Report("(no actions detected — stopping)");
-                    break;
-                }
-
-                if (actions.Exists(a => a.Type == DexActionType.Done))
-                {
-                    Report("Agent signalled [DONE].");
-                    taskDone = true;
-                    break;
-                }
-
-                _conversationHistory.AppendLine($"--- Turn {iter} ---");
-                _conversationHistory.AppendLine("AI said: " + Trim(said, 400));
-
-                foreach (var action in actions)
-                {
-                    var result = await ExecuteActionAsync(action);
-                    _conversationHistory.AppendLine($"[{action.Type}: {action.Arg}]");
-                    if (!string.IsNullOrWhiteSpace(result))
-                    {
-                        _conversationHistory.AppendLine("Result:");
-                        _conversationHistory.AppendLine(Trim(result, 1500));
-                    }
-                    _conversationHistory.AppendLine();
+                    var r = await Run(a);
+                    _history.AppendLine($"[{a.Type}: {a.Arg}]");
+                    if (!string.IsNullOrWhiteSpace(r)) _history.AppendLine("Result:\n" + Trunc(r, 1500));
+                    _history.AppendLine();
                 }
             }
-
-            return "Task finished.\n\n" + StripActionBlocks(lastResponse).Trim();
+            return "Task finished.\n\n" + Strip(last).Trim();
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  System prompt
-        // ─────────────────────────────────────────────────────────────
-
-        private string BuildSystemPrompt(string fileTree, string contextFiles)
+        // ── Prompt ──────────────────────────────────────────────────
+        private string BuildSystemPrompt()
         {
+            var tree = BuildTree(); var ctx = ReadContext();
             return
-                "You are Aven Dex, an autonomous coding agent inside the AVEIN app.\n" +
-                "You work on a project folder. You take ONE action at a time, observe the result, then decide the next step.\n\n" +
-                "PROJECT ROOT: " + _projectRoot + "\n" +
-                "PERMISSION MODE: " + PermissionMode + "\n\n" +
-                "FILE TREE:\n" + fileTree + "\n\n" +
-                "KEY FILE CONTENTS:\n" + contextFiles + "\n\n" +
-                "AVAILABLE ACTIONS:\n" +
-                "  [READ_FILE:path]                        — Read a file. ALWAYS read before editing.\n" +
-                "  [EDIT_FILE:path]                        — Replace an exact string in a file.\n" +
-                "     old:<<<old text here>>>\n" +
-                "     new:<<<new text here>>>\n" +
-                "     [END_EDIT]\n" +
-                "  [WRITE_FILE:path]                       — Create or overwrite a file.\n" +
-                "     <<<full file content>>>\n" +
-                "     [END_WRITE]\n" +
-                "  [RUN_CMD:command]                       — Run a shell command in the project folder.\n" +
-                "  [TODO:item1 | item2 | item3]            — Track a multi-step task list.\n" +
-                "  [DONE]                                  — Task complete.\n\n" +
+                "You are Aven Dex, an autonomous coding agent inside AVEIN.\n" +
+                "One action at a time. Observe result. Decide next.\n\n" +
+                "ROOT: " + _root + "\nMODE: " + PermissionMode + "\n\n" +
+                "FILE TREE:\n" + tree + "\n\nKEY FILES:\n" + ctx + "\n\n" +
+                "ACTIONS (use exactly one of these tag formats):\n" +
+                "  [READ_FILE:path]\n" +
+                "  [WRITE_FILE:path] <<<content>>> [END_WRITE]\n" +
+                "  [EDIT_FILE:path] old:<<<text>>> new:<<<text>>> [END_EDIT]\n" +
+                "  [RUN_CMD:command]\n" +
+                "  [GLOB:pattern]        e.g. **/*.cs\n" +
+                "  [GREP:text]           search file contents\n" +
+                "  [LIST_DIR:path]\n" +
+                "  [DELETE_FILE:path]\n" +
+                "  [MOVE_FILE:src] [TO:dest]\n" +
+                "  [DOWNLOAD:url] [TO:path]\n" +
+                "  [WEB_FETCH:url]\n" +
+                "  [GIT:subcommand]      status/diff/log/add/commit/push\n" +
+                "  [TODO:item1 | item2]\n" +
+                "  [DONE]\n\n" +
                 "RULES:\n" +
-                "1. For existing files, PREFER [EDIT_FILE] over [WRITE_FILE]. Read first, then edit.\n" +
-                "2. For new files, use [WRITE_FILE].\n" +
-                "3. If the task has 3+ steps, output [TODO:...] first to plan.\n" +
-                "4. Never guess file contents. [READ_FILE] first.\n" +
-                "5. Use relative paths only.\n" +
-                "6. Do not use markdown code fences around tags.\n" +
-                "7. When done, output [DONE] on its own line.\n";
+                "1. Edit existing files with [EDIT_FILE]. Read first.\n" +
+                "2. New files → [WRITE_FILE].\n" +
+                "3. 3+ steps → start with [TODO:...].\n" +
+                "4. Never guess file contents. Read or grep first.\n" +
+                "5. Relative paths only. No markdown fences.\n";
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  Action parsing
-        // ─────────────────────────────────────────────────────────────
-
-        private List<DexAction> ParseActions(string response)
+        // ── Parse ───────────────────────────────────────────────────
+        private List<DexAction> Parse(string r)
         {
-            var actions = new List<DexAction>();
+            var list = new List<DexAction>();
+            void Add(DexActionType t, string a) { if (!string.IsNullOrWhiteSpace(a)) list.Add(new DexAction { Type = t, Arg = a.Trim() }); }
 
-            foreach (Match m in Regex.Matches(response, @"\[READ_FILE:([^\]]+)\]"))
-                actions.Add(new DexAction { Type = DexActionType.ReadFile, Arg = m.Groups[1].Value.Trim() });
+            foreach (Match m in Regex.Matches(r, @"\[READ_FILE:([^\]]+)\]")) Add(DexActionType.ReadFile, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[RUN_CMD:([^\]]+)\]")) Add(DexActionType.RunCmd, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[GLOB:([^\]]+)\]")) Add(DexActionType.Glob, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[GREP:([^\]]+)\]")) Add(DexActionType.Grep, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[LIST_DIR:([^\]]+)\]")) Add(DexActionType.ListDir, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[DELETE_FILE:([^\]]+)\]")) Add(DexActionType.DeleteFile, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[GIT:([^\]]+)\]")) Add(DexActionType.Git, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[WEB_FETCH:([^\]]+)\]")) Add(DexActionType.WebFetch, m.Groups[1].Value);
+            foreach (Match m in Regex.Matches(r, @"\[TODO:([^\]]+)\]")) Add(DexActionType.Todo, m.Groups[1].Value);
 
-            foreach (Match m in Regex.Matches(response, @"\[RUN_CMD:([^\]]+)\]"))
-                actions.Add(new DexAction { Type = DexActionType.RunCmd, Arg = m.Groups[1].Value.Trim() });
+            foreach (Match m in Regex.Matches(r, @"\[WRITE_FILE:([^\]]+)\]\s*<<<([\s\S]*?)>>>\s*\[END_WRITE\]"))
+                list.Add(new DexAction { Type = DexActionType.WriteFile, Arg = m.Groups[1].Value.Trim(), Content = m.Groups[2].Value });
 
-            foreach (Match m in Regex.Matches(response, @"\[WRITE_FILE:([^\]]+)\]\s*<<<([\s\S]*?)>>>\s*\[END_WRITE\]"))
-            {
-                actions.Add(new DexAction
-                {
-                    Type = DexActionType.WriteFile,
-                    Arg = m.Groups[1].Value.Trim(),
-                    Content = m.Groups[2].Value
-                });
-            }
+            foreach (Match m in Regex.Matches(r, @"\[EDIT_FILE:([^\]]+)\]\s*old:<<<([\s\S]*?)>>>\s*new:<<<([\s\S]*?)>>>\s*\[END_EDIT\]"))
+                list.Add(new DexAction { Type = DexActionType.EditFile, Arg = m.Groups[1].Value.Trim(), OldString = m.Groups[2].Value, Content = m.Groups[3].Value });
 
-            foreach (Match m in Regex.Matches(response, @"\[EDIT_FILE:([^\]]+)\]\s*old:<<<([\s\S]*?)>>>\s*new:<<<([\s\S]*?)>>>\s*\[END_EDIT\]"))
-            {
-                actions.Add(new DexAction
-                {
-                    Type = DexActionType.EditFile,
-                    Arg = m.Groups[1].Value.Trim(),
-                    OldString = m.Groups[2].Value,
-                    Content = m.Groups[3].Value
-                });
-            }
+            foreach (Match m in Regex.Matches(r, @"\[MOVE_FILE:([^\]]+)\]\s*\[TO:([^\]]+)\]"))
+                list.Add(new DexAction { Type = DexActionType.MoveFile, Arg = m.Groups[1].Value.Trim(), Content = m.Groups[2].Value.Trim() });
 
-            foreach (Match m in Regex.Matches(response, @"\[TODO:([^\]]+)\]"))
-            {
-                actions.Add(new DexAction
-                {
-                    Type = DexActionType.Todo,
-                    Arg = m.Groups[1].Value.Trim()
-                });
-            }
+            foreach (Match m in Regex.Matches(r, @"\[DOWNLOAD:([^\]]+)\]\s*\[TO:([^\]]+)\]"))
+                list.Add(new DexAction { Type = DexActionType.Download, Arg = m.Groups[1].Value.Trim(), Content = m.Groups[2].Value.Trim() });
 
-            if (Regex.IsMatch(response, @"\[DONE\]", RegexOptions.IgnoreCase))
-                actions.Add(new DexAction { Type = DexActionType.Done, Arg = "" });
-
-            return actions;
+            if (Regex.IsMatch(r, @"\[DONE\]", RegexOptions.IgnoreCase)) list.Add(new DexAction { Type = DexActionType.Done });
+            return list;
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  Action execution
-        // ─────────────────────────────────────────────────────────────
-
-        private async Task<string> ExecuteActionAsync(DexAction action)
+        // ── Execute ─────────────────────────────────────────────────
+        private async Task<string> Run(DexAction a)
         {
-            switch (action.Type)
+            switch (a.Type)
             {
-                case DexActionType.ReadFile:
-                    return ReadFileSafe(action.Arg);
-
-                case DexActionType.WriteFile:
-                    if (!await RequestPermissionAsync("Write file", action.Arg)) return "(declined)";
-                    return WriteFile(action.Arg, action.Content);
-
-                case DexActionType.EditFile:
-                    if (!await RequestPermissionAsync("Edit file", action.Arg)) return "(declined)";
-                    return EditFile(action.Arg, action.OldString, action.Content);
-
-                case DexActionType.RunCmd:
-                    if (!await RequestPermissionAsync("Run command", action.Arg)) return "(declined)";
-                    return await RunCommandAsync(action.Arg);
-
-                case DexActionType.Todo:
-                    Report("[todo] " + action.Arg);
-                    return "Todo list updated: " + action.Arg;
-
-                case DexActionType.Done:
-                    return "[done]";
-
-                default:
-                    return "";
+                case DexActionType.ReadFile:   return ReadFile(a.Arg);
+                case DexActionType.Glob:       return Glob(a.Arg);
+                case DexActionType.Grep:       return Grep(a.Arg);
+                case DexActionType.ListDir:    return ListDir(a.Arg);
+                case DexActionType.WebFetch:   return await WebFetch(a.Arg);
+                case DexActionType.Todo:       Report("[todo] " + a.Arg); return "ok";
+                case DexActionType.Done:       return "done";
+                case DexActionType.WriteFile:  return await Ask("Write file", a.Arg) ? WriteFile(a.Arg, a.Content) : "(declined)";
+                case DexActionType.EditFile:   return await Ask("Edit file", a.Arg) ? EditFile(a.Arg, a.OldString, a.Content) : "(declined)";
+                case DexActionType.RunCmd:     return await Ask("Run command", a.Arg) ? await Cmd(a.Arg) : "(declined)";
+                case DexActionType.Git:        return await Ask("Git", a.Arg) ? await Cmd("git " + a.Arg) : "(declined)";
+                case DexActionType.DeleteFile: return await Ask("Delete file", a.Arg) ? DelFile(a.Arg) : "(declined)";
+                case DexActionType.MoveFile:   return await Ask("Move file", a.Arg + " → " + a.Content) ? MoveFile(a.Arg, a.Content) : "(declined)";
+                case DexActionType.Download:   return await Ask("Download", a.Arg + " → " + a.Content) ? await Download(a.Arg, a.Content) : "(declined)";
+                default: return "";
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  Permission layer
-        // ─────────────────────────────────────────────────────────────
-
-        private Task<bool> RequestPermissionAsync(string actionType, string detail)
+        private Task<bool> Ask(string what, string detail)
         {
-            if (PermissionMode == DexPermissionMode.Auto)
-            {
-                Report($"[auto-approved] {actionType}: {detail}");
-                return Task.FromResult(true);
-            }
-
-            if (PermissionMode == DexPermissionMode.AcceptEdits && actionType != "Run command")
-            {
-                Report($"[accept-edits] {actionType}: {detail}");
-                return Task.FromResult(true);
-            }
-
-            if (PermissionMode == DexPermissionMode.Plan)
-            {
-                Report($"[plan-blocked] {actionType}: {detail}");
-                return Task.FromResult(false);
-            }
-
-            var result = System.Windows.MessageBox.Show(
-                $"Aven Dex wants to {actionType.ToLower()}:\n\n{detail}\n\nAllow?",
-                "Aven Dex — Permission",
-                System.Windows.MessageBoxButton.YesNo,
-                System.Windows.MessageBoxImage.Question);
-
-            return Task.FromResult(result == System.Windows.MessageBoxResult.Yes);
+            if (PermissionMode == DexPermissionMode.Auto) { Report($"[auto] {what}"); return Task.FromResult(true); }
+            if (PermissionMode == DexPermissionMode.AcceptEdits && what != "Run command" && what != "Git" && what != "Delete file") { Report($"[accept] {what}"); return Task.FromResult(true); }
+            if (PermissionMode == DexPermissionMode.Plan) { Report($"[plan-block] {what}"); return Task.FromResult(false); }
+            var r = System.Windows.MessageBox.Show($"Aven Dex wants to {what.ToLower()}:\n\n{detail}\n\nAllow?", "Aven Dex", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+            return Task.FromResult(r == System.Windows.MessageBoxResult.Yes);
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  File operations
-        // ─────────────────────────────────────────────────────────────
-
-        private string ReadFileSafe(string relativePath)
+        // ── Tools ───────────────────────────────────────────────────
+        private string ReadFile(string p)
         {
-            try
-            {
-                var full = Path.Combine(_projectRoot, relativePath);
-                if (!File.Exists(full))
+            try { var f = Path.Combine(_root, p); if (!File.Exists(f)) { Report($"[read ✗] {p}"); return "(not found)"; }
+                var t = File.ReadAllText(f); if (t.Length > 8000) t = t.Substring(0, 8000) + "\n...";
+                Report($"[read ✓] {p} ({t.Length})"); return t; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private string WriteFile(string p, string c)
+        {
+            try { var f = Path.Combine(_root, p); var d = Path.GetDirectoryName(f); if (!string.IsNullOrEmpty(d)) Directory.CreateDirectory(d);
+                c = (c ?? "").TrimStart('\r', '\n').TrimEnd(); File.WriteAllText(f, c);
+                Report($"[write ✓] {p} ({c.Length})"); return $"Wrote {p}."; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private string EditFile(string p, string oldS, string newS)
+        {
+            try { var f = Path.Combine(_root, p); if (!File.Exists(f)) return "(not found)";
+                var c = File.ReadAllText(f); oldS = oldS.TrimStart('\r', '\n').TrimEnd(); newS = newS.TrimStart('\r', '\n').TrimEnd();
+                var i1 = c.IndexOf(oldS, StringComparison.Ordinal); if (i1 < 0) return "(old text not found)";
+                var i2 = c.IndexOf(oldS, i1 + oldS.Length, StringComparison.Ordinal); if (i2 >= 0) return "(old text appears multiple times)";
+                File.WriteAllText(f, c.Substring(0, i1) + newS + c.Substring(i1 + oldS.Length));
+                Report($"[edit ✓] {p}"); return $"Edited {p}."; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private string Glob(string pattern)
+        {
+            try { var dir = _root; var fp = pattern;
+                if (pattern.Contains("/") && !pattern.StartsWith("*")) { var s = pattern.IndexOf('/'); dir = Path.Combine(_root, pattern.Substring(0, s)); fp = pattern.Substring(s + 1); }
+                fp = fp.Replace("**/", "").Replace("**", "*");
+                if (!Directory.Exists(dir)) return "(no matches)";
+                var m = Directory.GetFiles(dir, fp, SearchOption.AllDirectories)
+                    .Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/'))
+                    .Where(f => !f.Contains("/bin/") && !f.Contains("/obj/") && !f.Contains("/node_modules/") && !f.Contains("/.git/"))
+                    .Take(50).ToList();
+                Report($"[glob ✓] {pattern} → {m.Count}");
+                return m.Count == 0 ? "(no matches)" : string.Join("\n", m); }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private string Grep(string text)
+        {
+            try { var hits = new List<string>(); int n = 0;
+                foreach (var f in Directory.GetFiles(_root, "*.*", SearchOption.AllDirectories))
                 {
-                    Report($"[read ✗] {relativePath} — not found");
-                    return $"(file not found: {relativePath})";
+                    var rel = Path.GetRelativePath(_root, f).Replace('\\', '/');
+                    if (rel.Contains("/bin/") || rel.Contains("/obj/") || rel.Contains("/node_modules/") || rel.Contains("/.git/")) continue;
+                    if (n++ > 300) break;
+                    try { var lines = File.ReadAllText(f).Split('\n');
+                        for (int i = 0; i < lines.Length; i++)
+                            if (lines[i].IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0) { hits.Add($"{rel}:{i + 1}: {lines[i].Trim()}"); if (hits.Count >= 30) break; }
+                    } catch { }
+                    if (hits.Count >= 30) break;
                 }
-
-                var text = File.ReadAllText(full);
-                if (text.Length > 8000) text = text.Substring(0, 8000) + "\n... (truncated at 8000 chars)";
-                Report($"[read ✓] {relativePath} ({text.Length} chars)");
-                return text;
-            }
-            catch (Exception ex)
-            {
-                Report($"[read ✗] {relativePath} — {ex.Message}");
-                return "(read error: " + ex.Message + ")";
-            }
+                Report($"[grep ✓] \"{text}\" → {hits.Count}");
+                return hits.Count == 0 ? "(no matches)" : string.Join("\n", hits); }
+            catch (Exception e) { return "err: " + e.Message; }
         }
 
-        private string WriteFile(string relativePath, string content)
+        private string ListDir(string p)
         {
-            try
-            {
-                var full = Path.Combine(_projectRoot, relativePath);
-                var dir = Path.GetDirectoryName(full);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-
-                content = content.TrimStart('\r', '\n').TrimEnd();
-                File.WriteAllText(full, content);
-
-                Report($"[write ✓] {relativePath} ({content.Length} chars)");
-                return $"Wrote {relativePath} ({content.Length} chars).";
-            }
-            catch (Exception ex)
-            {
-                Report($"[write ✗] {relativePath} — {ex.Message}");
-                return "write error: " + ex.Message;
-            }
+            try { var f = string.IsNullOrWhiteSpace(p) ? _root : Path.Combine(_root, p); if (!Directory.Exists(f)) return "(not found)";
+                var sb = new StringBuilder();
+                foreach (var d in Directory.GetDirectories(f)) sb.AppendLine("[dir] " + Path.GetFileName(d) + "/");
+                foreach (var x in Directory.GetFiles(f)) sb.AppendLine("[file] " + Path.GetFileName(x) + " (" + new FileInfo(x).Length + "b)");
+                Report($"[ls ✓] {p}"); return sb.Length == 0 ? "(empty)" : sb.ToString().Trim(); }
+            catch (Exception e) { return "err: " + e.Message; }
         }
 
-        private string EditFile(string relativePath, string oldString, string newString)
+        private string DelFile(string p)
         {
-            try
-            {
-                var full = Path.Combine(_projectRoot, relativePath);
-                if (!File.Exists(full))
-                {
-                    Report($"[edit ✗] {relativePath} — file not found");
-                    return "(file not found: " + relativePath + ")";
-                }
-
-                var content = File.ReadAllText(full);
-                oldString = oldString.TrimStart('\r', '\n').TrimEnd();
-                newString = newString.TrimStart('\r', '\n').TrimEnd();
-
-                var firstIndex = content.IndexOf(oldString, StringComparison.Ordinal);
-                if (firstIndex == -1)
-                {
-                    Report($"[edit ✗] {relativePath} — old string not found");
-                    return $"(edit failed: the exact old text was not found in {relativePath}. Read the file again and check for whitespace differences.)";
-                }
-
-                var secondIndex = content.IndexOf(oldString, firstIndex + oldString.Length, StringComparison.Ordinal);
-                if (secondIndex != -1)
-                {
-                    Report($"[edit ✗] {relativePath} — old string appears multiple times");
-                    return $"(edit failed: the old text appears more than once in {relativePath}. Include more surrounding context to make it unique.)";
-                }
-
-                var updated = content.Substring(0, firstIndex) + newString + content.Substring(firstIndex + oldString.Length);
-                File.WriteAllText(full, updated);
-
-                Report($"[edit ✓] {relativePath} (replaced {oldString.Length} chars with {newString.Length})");
-                return $"Edited {relativePath}: replaced {oldString.Length} chars with {newString.Length} chars.";
-            }
-            catch (Exception ex)
-            {
-                Report($"[edit ✗] {relativePath} — {ex.Message}");
-                return "edit error: " + ex.Message;
-            }
+            try { var f = Path.Combine(_root, p); if (!File.Exists(f)) return "(not found)"; File.Delete(f); Report($"[del ✓] {p}"); return "Deleted " + p; }
+            catch (Exception e) { return "err: " + e.Message; }
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  Command execution
-        // ─────────────────────────────────────────────────────────────
-
-        private async Task<string> RunCommandAsync(string command)
+        private string MoveFile(string s, string d)
         {
-            Report($"[cmd →] {command}");
+            try { var fs = Path.Combine(_root, s); var fd = Path.Combine(_root, d); if (!File.Exists(fs)) return "(not found)";
+                var dir = Path.GetDirectoryName(fd); if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                if (File.Exists(fd)) File.Delete(fd); File.Move(fs, fd); Report($"[mv ✓] {s} → {d}"); return "Moved."; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
 
-            var output = await Task.Run(() =>
+        private async Task<string> Download(string url, string p)
+        {
+            try { var f = Path.Combine(_root, p); var d = Path.GetDirectoryName(f); if (!string.IsNullOrEmpty(d)) Directory.CreateDirectory(d);
+                Report($"[dl →] {url}"); var b = await _http.GetByteArrayAsync(url); File.WriteAllBytes(f, b);
+                Report($"[dl ✓] {p} ({b.Length}b)"); return $"Downloaded ({b.Length} bytes)."; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private async Task<string> WebFetch(string url)
+        {
+            try { Report($"[fetch →] {url}"); var h = await _http.GetStringAsync(url);
+                h = Regex.Replace(h, @"<script[\s\S]*?</script>", "", RegexOptions.IgnoreCase);
+                h = Regex.Replace(h, @"<style[\s\S]*?</style>", "", RegexOptions.IgnoreCase);
+                h = Regex.Replace(h, @"<[^>]+>", " "); h = Regex.Replace(h, @"\s+", " ").Trim();
+                if (h.Length > 4000) h = h.Substring(0, 4000) + "...";
+                Report($"[fetch ✓] {h.Length}c"); return h; }
+            catch (Exception e) { return "err: " + e.Message; }
+        }
+
+        private async Task<string> Cmd(string cmd)
+        {
+            Report($"[cmd →] {cmd}");
+            return await Task.Run(() =>
             {
-                try
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = "/c " + command,
-                        WorkingDirectory = _projectRoot,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    using (var proc = Process.Start(psi))
-                    {
-                        var stdout = proc.StandardOutput.ReadToEnd();
-                        var stderr = proc.StandardError.ReadToEnd();
-                        proc.WaitForExit(300000);
-
-                        var combined = (stdout + "\n" + stderr).Trim();
-                        if (combined.Length > 4000) combined = combined.Substring(0, 4000) + "\n... (truncated)";
-                        return combined;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    return "(command error: " + ex.Message + ")";
-                }
+                try { var psi = new ProcessStartInfo { FileName = "cmd.exe", Arguments = "/c " + cmd, WorkingDirectory = _root,
+                        RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+                    using (var pr = Process.Start(psi))
+                    { var o = pr.StandardOutput.ReadToEnd() + "\n" + pr.StandardError.ReadToEnd();
+                        pr.WaitForExit(300000); o = o.Trim(); if (o.Length > 4000) o = o.Substring(0, 4000) + "...";
+                        Report($"[cmd ✓] {Trunc(o, 200)}"); return o; } }
+                catch (Exception e) { return "err: " + e.Message; }
             });
-
-            Report($"[cmd ✓] {Trim(output, 300)}");
-            return output;
         }
 
-        // ─────────────────────────────────────────────────────────────
-        //  Context compaction
-        // ─────────────────────────────────────────────────────────────
-
-        private string CompactHistory(string history)
+        // ── Context ─────────────────────────────────────────────────
+        private string BuildTree()
         {
-            var lines = history.Split('\n');
-            if (lines.Length < 20) return history;
-
-            var keepCount = lines.Length * 2 / 5;
-            var oldPart = string.Join("\n", lines.Take(lines.Length - keepCount));
-            var recentPart = string.Join("\n", lines.Skip(lines.Length - keepCount));
-
-            var summary = SummarizeOldPart(oldPart);
-            return "[COMPACTED HISTORY SUMMARY]\n" + summary + "\n\n[RECENT STEPS]\n" + recentPart;
+            try { var sb = new StringBuilder(); int n = 0;
+                foreach (var f in Directory.GetFiles(_root, "*", SearchOption.AllDirectories))
+                { var r = Path.GetRelativePath(_root, f);
+                    if (r.Contains("\\bin\\") || r.Contains("\\obj\\") || r.Contains("\\node_modules\\") || r.Contains("\\.git\\")) continue;
+                    if (n++ >= 300) { sb.AppendLine("..."); break; }
+                    sb.AppendLine("- " + r.Replace('\\', '/')); }
+                return sb.ToString().Trim(); }
+            catch (Exception e) { return "(err: " + e.Message + ")"; }
         }
 
-        private string SummarizeOldPart(string oldPart)
-        {
-            var reads = Regex.Matches(oldPart, @"\[ReadFile: ([^\]]+)\]").Count;
-            var writes = Regex.Matches(oldPart, @"\[WriteFile: ([^\]]+)\]").Count;
-            var edits = Regex.Matches(oldPart, @"\[EditFile: ([^\]]+)\]").Count;
-            var cmds = Regex.Matches(oldPart, @"\[RunCmd: ([^\]]+)\]").Count;
-
-            return $"Earlier in this session: {reads} file reads, {writes} file writes, {edits} edits, {cmds} commands run. " +
-                   "Detailed content of these steps has been compacted to save context. " +
-                   "Refer to the file tree and recent steps for current state.";
-        }
-
-        // ─────────────────────────────────────────────────────────────
-        //  Project context
-        // ─────────────────────────────────────────────────────────────
-
-        private string ReadContextFiles(string root)
+        private string ReadContext()
         {
             var sb = new StringBuilder();
-            var priorityNames = new[]
-            {
-                "README.md", "readme.md", "Readme.md",
-                "package.json", "requirements.txt", "pyproject.toml",
-                "Cargo.toml", "go.mod", "AVEIN.csproj"
-            };
-
-            foreach (var name in priorityNames)
-            {
-                var path = Path.Combine(root, name);
-                if (File.Exists(path))
-                {
-                    var content = SafeRead(path, 3000);
-                    sb.AppendLine($"── {name} ──");
-                    sb.AppendLine(content);
-                    sb.AppendLine();
-                }
-            }
-
-            return sb.Length == 0 ? "(no README or config files found)" : sb.ToString();
+            var names = new[] { "README.md", "readme.md", "package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod", "AVEIN.csproj" };
+            foreach (var n in names) { var p = Path.Combine(_root, n);
+                if (File.Exists(p)) { sb.AppendLine("── " + n + " ──"); var c = SafeRead(p, 3000); sb.AppendLine(c); sb.AppendLine(); } }
+            return sb.Length == 0 ? "(no config files)" : sb.ToString();
         }
 
-        private string BuildFileTree(string root, int maxFiles)
+        private string SafeRead(string p, int max)
         {
-            try
-            {
-                var sb = new StringBuilder();
-                int count = 0;
-                foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
-                {
-                    var rel = Path.GetRelativePath(root, file);
-                    if (rel.Contains("\\bin\\") || rel.Contains("\\obj\\") || rel.Contains("\\node_modules\\") || rel.Contains("\\.git\\")) continue;
-                    if (count++ >= maxFiles) { sb.AppendLine("... (truncated)"); break; }
-                    sb.AppendLine("- " + rel.Replace('\\', '/'));
-                }
-                return sb.ToString().Trim();
-            }
-            catch (Exception ex)
-                
+            try { var t = File.ReadAllText(p); if (t.Length > max) t = t.Substring(0, max) + "..."; return t; }
+            catch (Exception e) { return "(err: " + e.Message + ")"; }
+        }
+
+        // ── Utils ───────────────────────────────────────────────────
+        private string Strip(string r)
+        {
+            r = Regex.Replace(r, @"\[(READ_FILE|RUN_CMD|GLOB|GREP|LIST_DIR|DELETE_FILE|GIT|WEB_FETCH|TODO):[^\]]+\]", "");
+            r = Regex.Replace(r, @"\[(WRITE_FILE|EDIT_FILE):[^\]]+\][\s\S]*?\[END_(WRITE|EDIT)\]", "");
+            r = Regex.Replace(r, @"\[MOVE_FILE:[^\]]+\]\s*\[TO:[^\]]+\]", "");
+            r = Regex.Replace(r, @"\[DOWNLOAD:[^\]]+\]\s*\[TO:[^\]]+\]", "");
+            r = Regex.Replace(r, @"\[DONE\]", "", RegexOptions.IgnoreCase);
+            return r.Trim();
+        }
+
+        private static string Trunc(string s, int n) => string.IsNullOrEmpty(s) ? s : (s.Length <= n ? s : s.Substring(0, n) + "...");
+        private void Report(string m) => StepReport?.Invoke(m);
+    }
+}
