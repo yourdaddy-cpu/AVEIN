@@ -34,4 +34,14 @@
     </None>
   </ItemGroup>
 
+  <!-- Force-copy LLamaSharp native DLLs, preserving folder hierarchy -->
+  <Target Name="CopyLlamaSharpNatives" AfterTargets="Publish">
+    <ItemGroup>
+      <LlamaNatives Include="$(NuGetPackageRoot)llamasharp.backend.cpu\0.25.0\runtimes\win-x64\native\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LlamaNatives)"
+          DestinationFolder="$(PublishDir)runtimes\win-x64\native\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
