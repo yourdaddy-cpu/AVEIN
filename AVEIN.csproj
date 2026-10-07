@@ -11,6 +11,7 @@
     <Platforms>x64</Platforms>
     <Prefer32Bit>false</Prefer32Bit>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,5 +33,18 @@
       <Link>models\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
   </ItemGroup>
+
+  <Target Name="FixLlamaSharpRuntimes" AfterTargets="Publish">
+    <Delete Files="$(PublishDir)llama.dll" />
+    <Delete Files="$(PublishDir)llava_shared.dll" />
+    <Delete Files="$(PublishDir)ggml.dll" />
+    <Delete Files="$(PublishDir)ggml-base.dll" />
+    <Delete Files="$(PublishDir)ggml-cpu.dll" />
+    <Delete Files="$(PublishDir)mtmd.dll" />
+    <ItemGroup>
+      <LlamaRuntimes Include="$(NuGetPackageRoot)llamasharp.backend.cpu\0.25.0\runtimes\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LlamaRuntimes)" DestinationFolder="$(PublishDir)runtimes\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>
