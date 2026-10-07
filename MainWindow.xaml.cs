@@ -7,6 +7,7 @@ namespace AVEIN
     public partial class MainWindow : Window
     {
         private readonly ChatView _chatView = new ChatView();
+        private readonly AvenDexView _dexView = new AvenDexView();
         private readonly MemoryView _memoryView = new MemoryView();
         private readonly SettingsView _settingsView = new SettingsView();
         private readonly PluginsView _pluginsView = new PluginsView();
@@ -33,6 +34,7 @@ namespace AVEIN
         }
 
         private void NavChatButton_Click(object sender, RoutedEventArgs e) => ShowView(_chatView, NavChatButton);
+        private void NavDexButton_Click(object sender, RoutedEventArgs e) => ShowView(_dexView, NavDexButton);
         private void NavMemoryButton_Click(object sender, RoutedEventArgs e) => ShowView(_memoryView, NavMemoryButton);
         private void NavPluginsButton_Click(object sender, RoutedEventArgs e) => ShowView(_pluginsView, NavPluginsButton);
         private void NavSettingsButton_Click(object sender, RoutedEventArgs e) => ShowView(_settingsView, NavSettingsButton);
@@ -42,7 +44,7 @@ namespace AVEIN
         {
             MainContent.Content = view;
 
-            foreach (var button in new[] { NavChatButton, NavMemoryButton, NavPluginsButton, NavSettingsButton, NavAboutButton })
+            foreach (var button in new[] { NavChatButton, NavDexButton, NavMemoryButton, NavPluginsButton, NavSettingsButton, NavAboutButton })
                 button.Style = (Style)FindResource("NavButtonStyle");
 
             activeButton.Style = (Style)FindResource("NavButtonActiveStyle");
