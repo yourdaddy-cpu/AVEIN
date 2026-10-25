@@ -32,7 +32,7 @@ namespace AVEIN
     {
         private sealed class TodoItem { public string Text; public char State; }
         private sealed class Checkpoint { public string FullPath; public bool Existed; public byte[] Data; }
-        private sealed class SlashResult { public string Output, RunPrompt; }
+        private sealed class SlashResult { public string Output; public string RunPrompt = null; }
 
         private readonly LocalAiModule _ai;
         private readonly string _root;
@@ -276,7 +276,7 @@ namespace AVEIN
                 new ChatTurn("system", "You compress coding-agent transcripts. Write a dense summary (max 180 words): the user's goal, what was done (files read/changed), key findings, remaining steps." +
                     (string.IsNullOrWhiteSpace(focus) ? "" : " Focus on: " + focus)),
                 new ChatTurn("user", src)
-            }, 350, 0.2f, null, ct, null, 1.05f).ConfigureAwait(false);
+            }, 350, 0.2f, null, ct, null, 1.05f, new string[0]).ConfigureAwait(false);
 
             var tail = turns.Skip(turns.Count - keep).ToList();
             turns.Clear();
