@@ -384,8 +384,7 @@ namespace AVEIN
                     case DexActionType.WebFetch: return await WebFetchAsync(a.Arg).ConfigureAwait(false);
                     case DexActionType.WebSearch: return await WebSearchAsync(a.Arg).ConfigureAwait(false);
                     case DexActionType.WriteFile: return WriteFile(a.Arg, a.Content);
-                    case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll
-                                                                                     case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll);
+                    case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll);
                     case DexActionType.DeleteFile: return DeleteFile(a.Arg);
                     case DexActionType.MoveFile: return MoveFile(a.Arg);
                     case DexActionType.RunCmd: return await RunCmdAsync(a.Arg, ct).ConfigureAwait(false);
@@ -643,4 +642,4 @@ namespace AVEIN
         private void Report(string msg) => StepReport?.Invoke(msg);
         private void LogEx(Exception ex) => ActivityLogged?.Invoke("[ERROR] " + ex.Message);
     }
-                                                                 }
+}
