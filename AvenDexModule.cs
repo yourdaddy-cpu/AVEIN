@@ -3,15 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace AVEIN
 {
@@ -30,21 +26,12 @@ namespace AVEIN
         public string Content { get; set; }
         public string OldString { get; set; }
         public bool ReplaceAll { get; set; }
-        public int Position { get; set; }
     }
 
     public sealed class AvenDexModule
     {
         private sealed class TodoItem { public string Text; public char State; }
         private sealed class Checkpoint { public string FullPath; public bool Existed; public byte[] Data; }
-        private sealed class HookDef { public string Event, Matcher, Command; }
-        private sealed class DexSettings
-        {
-            public List<string> Allow = new List<string>();
-            public List<string> Deny = new List<string>();
-            public List<HookDef> Hooks = new List<HookDef>();
-        }
-        private sealed class ToolInfo { public string RuleName, Label, Detail, Preview; public bool ReadOnly, SubOk; }
         private sealed class SlashResult { public string Output, RunPrompt; }
 
         private readonly LocalAiModule _ai;
@@ -53,10 +40,10 @@ namespace AVEIN
         private readonly List<TodoItem> _todos = new List<TodoItem>();
         private readonly List<Checkpoint> _checkpoints = new List<Checkpoint>();
         private readonly HashSet<string> _readFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly HashSet<string> _sessionAllow = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
         private CancellationTokenSource _cts;
         private volatile bool _running;
-        private int _depth, _calls, _tokensIn, _tokensOut;
+        private int _calls, _tokensIn, _tokensOut;
 
         public static event Action<string> ActivityLogged;
         public event Action<string> StepReport;
@@ -67,7 +54,7 @@ namespace AVEIN
         private static HttpClient MakeHttp()
         {
             var c = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            c.DefaultRequestHeaders.UserAgent.ParseAdd("AVEIN-Dex/1.0");
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AVEIN-Dex/1.0");
             return c;
         }
 
@@ -91,11 +78,7 @@ namespace AVEIN
             "  /review        the model reviews the current git diff\n" +
             "  /commit [msg]  git add -A + commit\n" +
             "  /mode <m>      default | accept | plan | auto\n" +
-            "  /permissions   show allow/deny rules\n" +
-            "  /status /cost  session info\n" +
-            "  /resume        reload the last session\n" +
-            "  /export        save the transcript\n" +
-            "  /commands      list custom commands (.avein/commands/*.md)";
+            "  /status /cost  session info\n";
 
         public AvenDexModule(LocalAiModule ai, string projectRoot)
         {
@@ -131,7 +114,6 @@ namespace AVEIN
                 _turns.Add(new ChatTurn("user", text));
                 var result = await RunAgentAsync(_turns, MaxIterations, false, ct).ConfigureAwait(false);
 
-                SaveSession();
                 return result;
             }
             catch (OperationCanceledException) { return "(cancelled)"; }
@@ -178,7 +160,10 @@ namespace AVEIN
 
                 var msgs = new List<ChatTurn> { new ChatTurn("system", system) };
                 msgs.AddRange(turns);
+                
+                // Note: This requires your LocalAiModule to have ChatDetailedAsync implemented
                 var res = await _ai.ChatDetailedAsync(msgs, 1400, 0.15f, null, ct, null, 1.05f, AgentStops).ConfigureAwait(false);
+                
                 _calls++;
                 _tokensIn += msgs.Sum(t => LocalAiModule.EstimateTokens(t.Content));
                 _tokensOut += LocalAiModule.EstimateTokens(res.Text);
@@ -186,6 +171,7 @@ namespace AVEIN
 
                 var response = res.Text ?? "";
                 var actions = Parse(response, out var errors, out var said);
+                
                 if (!string.IsNullOrWhiteSpace(said)) { Report("AI: " + Trunc(said, 700)); lastSaid = said; }
                 turns.Add(new ChatTurn("assistant", string.IsNullOrWhiteSpace(response) ? "(no output)" : response));
 
@@ -197,7 +183,7 @@ namespace AVEIN
                         turns.Add(new ChatTurn("user", "You returned nothing. Call a tool, or give your final answer without tags."));
                         continue;
                     }
-                    return said;   // no tool requested = final answer
+                    return said;
                 }
 
                 var results = new StringBuilder();
@@ -233,8 +219,8 @@ namespace AVEIN
             sb.AppendLine("Call tools by writing the tags below. After the tags STOP and wait - results arrive in the next message. Never invent results.");
             sb.AppendLine();
             sb.AppendLine("TOOLS");
-            sb.AppendLine("[READ:path]  [READ:path:40-120]");
-            sb.AppendLine("[LS:dir]  [GLOB:**/*.cs]  [GREP:regex]  [GREP:regex @ *.cs]");
+            sb.AppendLine("[READ:path]");
+            sb.AppendLine("[LS:dir]  [GLOB:**/*.cs]  [GREP:regex]");
             if (!sub)
             {
                 sb.AppendLine("[EDIT:path]");
@@ -317,7 +303,6 @@ namespace AVEIN
 
         private static readonly Regex WriteRx = new Regex(@"\[(?:WRITE|WRITE_FILE):([^\]\r\n]+)\]([\s\S]*?)\[END_WRITE\]", RegexOptions.IgnoreCase);
         private static readonly Regex EditRx = new Regex(@"\[(EDIT|EDIT_ALL|EDIT_FILE):([^\]\r\n]+)\][ \t]*\r?\n?\s*<{3,}[ \t]*SEARCH[^\r\n]*\r?\n([\s\S]*?)\r?\n={3,}[ \t]*\r?\n([\s\S]*?)\r?\n?>{3,}[ \t]*REPLACE", RegexOptions.IgnoreCase);
-        private static readonly Regex LegacyEditRx = new Regex(@"\[EDIT_FILE:([^\]\r\n]+)\]\s*old:\s*<<<([\s\S]*?)>>>\s*new:\s*<<<([\s\S]*?)>>>\s*(?:\[END_EDIT\])?", RegexOptions.IgnoreCase);
         private static readonly Regex OpenerRx = new Regex(@"\[(WRITE|WRITE_FILE|EDIT|EDIT_ALL|EDIT_FILE):([^\]\r\n]+)\]", RegexOptions.IgnoreCase);
         private static readonly Regex TagOpenRx = new Regex(@"\[([A-Za-z_]+):");
         private static readonly Regex DoneRx = new Regex(@"\[DONE\]", RegexOptions.IgnoreCase);
@@ -342,11 +327,9 @@ namespace AVEIN
             errors = new List<string>();
             r = r ?? "";
             var work = r.ToCharArray();
-            var spans = new List<KeyValuePair<int, int>>();
 
             void Consume(int index, int length)
             {
-                spans.Add(new KeyValuePair<int, int>(index, length));
                 for (int i = index; i < index + length && i < work.Length; i++) work[i] = ' ';
             }
 
@@ -358,25 +341,51 @@ namespace AVEIN
 
             foreach (Match m in EditRx.Matches(r))
             {
-                var type = m.Groups[1].Value.ToUpperInvariant() == "EDIT_ALL" ? DexActionType.EditFile : DexActionType.EditFile;
-                actions.Add(new DexAction { Type = type, Arg = m.Groups[2].Value.Trim(), OldString = m.Groups[3].Value, Content = m.Groups[4].Value, ReplaceAll = m.Groups[1].Value.ToUpperInvariant() == "EDIT_ALL" });
-                Consume(m.Index, m.Length);
-            }
-
-            foreach (Match m in LegacyEditRx.Matches(r))
-            {
-                actions.Add(new DexAction { Type = DexActionType.EditFile, Arg = m.Groups[1].Value.Trim(), OldString = m.Groups[2].Value, Content = m.Groups[3].Value });
+                var isAll = m.Groups[1].Value.ToUpperInvariant() == "EDIT_ALL";
+                actions.Add(new DexAction { Type = DexActionType.EditFile, Arg = m.Groups[2].Value.Trim(), OldString = m.Groups[3].Value, Content = m.Groups[4].Value, ReplaceAll = isAll });
                 Consume(m.Index, m.Length);
             }
 
             foreach (Match m in OpenerRx.Matches(r))
             {
                 if (work[m.Index] != ' ')
-                    errors.Add("Tool tag was not closed: " + m.Value + " (missing [END_WRITE] or [END_EDIT])");
+                    errors.Add("Tool tag was not closed: " + m.Value);
             }
 
             var leftover = new string(work);
             foreach (Match m in TagOpenRx.Matches(leftover))
             {
                 var name = m.Groups[1].Value.ToUpperInvariant();
-           
+                if (!TagMap.ContainsKey(name)) continue;
+
+                var close = leftover.IndexOf(']', m.Index);
+                if (close < 0) { errors.Add("Tool tag missing ']': " + m.Value); continue; }
+
+                var arg = leftover.Substring(m.Index + m.Length, close - (m.Index + m.Length)).Trim();
+                actions.Add(new DexAction { Type = TagMap[name], Arg = arg });
+                Consume(m.Index, close - m.Index + 1);
+            }
+
+            prose = new string(work).Trim();
+            prose = Regex.Replace(prose, @"\s{2,}", " ").Trim();
+            
+            if (DoneRx.IsMatch(r)) actions.Add(new DexAction { Type = DexActionType.Done });
+
+            return actions;
+        }
+
+        private async Task<string> ExecuteActionAsync(DexAction a, bool sub, CancellationToken ct)
+        {
+            try
+            {
+                if (sub && (a.Type == DexActionType.WriteFile || a.Type == DexActionType.EditFile || a.Type == DexActionType.DeleteFile || a.Type == DexActionType.MoveFile || a.Type == DexActionType.RunCmd))
+                    return "[ERROR] Sub-agent tried to use a write tool. Sub-agents are read-only.";
+
+                switch (a.Type)
+                {
+                    case DexActionType.ReadFile: return ReadFile(a.Arg);
+                    case DexActionType.ListDir: return ListDir(a.Arg);
+                    case DexActionType.Glob: return Glob(a.Arg);
+                    case DexActionType.Grep: return Grep(a.Arg);
+                    case DexActionType.Todo: return UpdateTodos(a.Arg);
+                    case DexActionType.
