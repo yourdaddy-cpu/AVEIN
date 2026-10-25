@@ -110,6 +110,7 @@ namespace AVEIN
             try
             {
                 var safeName = Path.GetFileName(zipFileName);
+                if (string.IsNullOrWhiteSpace(safeName)) safeName = "archive.zip";
                 if (!safeName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                     safeName += ".zip";
 
@@ -120,18 +121,24 @@ namespace AVEIN
                 if (!Directory.Exists(sourcePath))
                 {
                     Log("Zip source folder not found: " + sourcePath);
-                    return $"Source folder not found. Create some files first, then zip them.";
+                    return "Source folder not found. Create some files first, then zip them.";
                 }
 
-                if (!Directory.Exists(SandboxFolder))
-                    Directory.CreateDirectory(SandboxFolder);
-
                 var destPath = Path.Combine(SandboxFolder, safeName);
+                // Build the archive OUTSIDE the folder being zipped (the old code zipped the zip into itself).
+                var tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".zip");
 
-                if (File.Exists(destPath))
-                    File.Delete(destPath);
+                using (var zip = ZipFile.Open(tempPath, ZipArchiveMode.Create))
+                {
+                    foreach (var file in Directory.GetFiles(sourcePath, "*", SearchOption.AllDirectories))
+                    {
+                        if (file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+                        zip.CreateEntryFromFile(file, Path.GetRelativePath(sourcePath, file).Replace('\\', '/'), CompressionLevel.Fastest);
+                    }
+                }
 
-                ZipFile.CreateFromDirectory(sourcePath, destPath, CompressionLevel.Fastest, false);
+                if (File.Exists(destPath)) File.Delete(destPath);
+                File.Move(tempPath, destPath);
 
                 var info = new FileInfo(destPath);
                 Log($"Created zip file: {safeName} ({info.Length} bytes)");
