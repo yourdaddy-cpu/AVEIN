@@ -68,17 +68,10 @@ namespace AVEIN
             "Aven Dex commands\n" +
             "  /help          this list\n" +
             "  /clear         reset conversation + todo list\n" +
-            "  /compact       summarise older context now\n" +
-            "  /init          create AVEIN.md (project memory)\n" +
-            "  /memory        show project memory\n" +
-            "  # note         quick-add a note to AVEIN.md\n" +
             "  /todos         show the todo list\n" +
             "  /undo [n]      revert the last n file changes\n" +
-            "  /diff          git status + diff stat\n" +
-            "  /review        the model reviews the current git diff\n" +
-            "  /commit [msg]  git add -A + commit\n" +
             "  /mode <m>      default | accept | plan | auto\n" +
-            "  /status /cost  session info\n";
+            "  /status        session info\n";
 
         public AvenDexModule(LocalAiModule ai, string projectRoot)
         {
@@ -161,7 +154,6 @@ namespace AVEIN
                 var msgs = new List<ChatTurn> { new ChatTurn("system", system) };
                 msgs.AddRange(turns);
                 
-                // Note: This requires your LocalAiModule to have ChatDetailedAsync implemented
                 var res = await _ai.ChatDetailedAsync(msgs, 1400, 0.15f, null, ct, null, 1.05f, AgentStops).ConfigureAwait(false);
                 
                 _calls++;
@@ -388,4 +380,8 @@ namespace AVEIN
                     case DexActionType.Glob: return Glob(a.Arg);
                     case DexActionType.Grep: return Grep(a.Arg);
                     case DexActionType.Todo: return UpdateTodos(a.Arg);
-                    case DexActionType.
+                    case DexActionType.SubTask: return await RunAgentAsync(new List<ChatTurn> { new ChatTurn("user", a.Arg) }, 10, true, ct).ConfigureAwait(false);
+                    case DexActionType.WebFetch: return await WebFetchAsync(a.Arg).ConfigureAwait(false);
+                    case DexActionType.WebSearch: return await WebSearchAsync(a.Arg).ConfigureAwait(false);
+                    case DexActionType.WriteFile: return WriteFile(a.Arg, a.Content);
+                    case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll
