@@ -66,7 +66,7 @@ namespace AVEIN
 
         private enum PromptStyle { Phi3, Phi4, ChatML, Llama3, Gemma }
 
-        // Everything below is shared by ALL instances: one model, one lock.
+        // Shared by ALL instances: one model, one lock.
         private static readonly SemaphoreSlim Gate = new SemaphoreSlim(1, 1);
         private static readonly object ConfigLock = new object();
         private static readonly List<ChatTurn> Chat = new List<ChatTurn>();
@@ -149,7 +149,8 @@ namespace AVEIN
             {
                 var dir = Path.Combine(AppContext.BaseDirectory, "data");
                 Directory.CreateDirectory(dir);
-                File.AppendAllText(Path.Combine(dir, "ai-error.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what}\n{ex}\n\n");
+                File.AppendAllText(Path.Combine(dir, "ai-error.log"),
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what}\n{ex}\n\n");
             }
             catch { }
         }
@@ -173,7 +174,7 @@ namespace AVEIN
             _model = null; _executor = null; _loadedModelName = null; _ctxSize = 0;
         }
 
-        // Must be called while holding Gate.
+        // Call only while holding Gate.
         private static bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
@@ -271,7 +272,7 @@ namespace AVEIN
             return sb.ToString();
         }
 
-        // Drops/shrinks the oldest content until the prompt fits the context window.
+        // Drops / shrinks the oldest content until the prompt fits the context window.
         private static List<ChatTurn> Fit(IList<ChatTurn> input, int budget)
         {
             var turns = input.Select(t => new ChatTurn(t.Role, Neutralize(t.Content))).ToList();
@@ -287,4 +288,160 @@ namespace AVEIN
                 int keep = (int)(big.Content.Length * 0.75);
                 big.Content = big.Role == "system"
                     ? big.Content.Substring(0, keep) + "\n[...trimmed...]"
-                    : "[...trimmed...]\n" + big.Content.Substring(big.Content.Length - ke
+                    : "[...trimmed...]\n" + big.Content.Substring(big.Content.Length - keep);
+            }
+            return turns;
+        }
+
+        // ───────────────────────── generation ─────────────────────────
+        private sealed class StopFilter
+        {
+            private readonly string[] _stops;
+            private readonly StringBuilder _pending = new StringBuilder();
+            public bool Stopped { get; private set; }
+            public StopFilter(string[] stops) { _stops = stops; }
+
+            public string Push(string piece)
+            {
+                if (Stopped || string.IsNullOrEmpty(piece)) return "";
+                _pending.Append(piece);
+                var s = _pending.ToString();
+                int cut = -1;
+                foreach (var st in _stops)
+                {
+                    int i = s.IndexOf(st, StringComparison.Ordinal);
+                    if (i >= 0 && (cut < 0 || i < cut)) cut = i;
+                }
+                if (cut >= 0) { Stopped = true; _pending.Clear(); return s.Substring(0, cut); }
+
+                int hold = 0;   // keep back a tail that might still become a stop string
+                foreach (var st in _stops)
+                    for (int k = Math.Min(st.Length - 1, s.Length); k > hold; k--)
+                        if (s.EndsWith(st.Substring(0, k), StringComparison.Ordinal)) { hold = k; break; }
+
+                var emit = s.Substring(0, s.Length - hold);
+                _pending.Clear();
+                _pending.Append(s, s.Length - hold, hold);
+                return emit;
+            }
+
+            public string Flush()
+            {
+                if (Stopped) return "";
+                var s = _pending.ToString();
+                _pending.Clear();
+                return s;
+            }
+        }
+
+        private static string CleanUp(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            if (text.IndexOf('Ċ') >= 0 || text.IndexOf('Ġ') >= 0)
+                text = text.Replace("Ċ", "\n").Replace("Ġ", " ").Replace("ĉ", "\t");
+            foreach (var s in new[] { "<|im_end|>", "<|im_start|>", "<|im_sep|>", "<|end|>", "<|assistant|>", "<|endoftext|>", "<|eot_id|>", "<end_of_turn>" })
+                text = text.Replace(s, "");
+            text = text.Trim();
+            return Regex.Replace(text, @"^assistant\s*[:\r\n]+\s*", "", RegexOptions.IgnoreCase);
+        }
+
+        private static async Task<string> GenerateAsync(string prompt, int maxTokens, float temperature, float repeatPenalty,
+            Action<string> onToken, CancellationToken ct, string[] extraStops)
+        {
+            var stops = extraStops == null ? BaseStops : BaseStops.Concat(extraStops).ToArray();
+            var inference = new InferenceParams
+            {
+                MaxTokens = maxTokens,
+                AntiPrompts = stops,
+                SamplingPipeline = new DefaultSamplingPipeline
+                {
+                    Temperature = Math.Max(0.05f, temperature),
+                    RepeatPenalty = repeatPenalty,
+                    TopK = 40,
+                    TopP = 0.9f
+                }
+            };
+
+            var filter = new StopFilter(stops);
+            var sb = new StringBuilder();
+            await foreach (var piece in _executor.InferAsync(prompt, inference, ct).ConfigureAwait(false))
+            {
+                var safe = filter.Push(piece);
+                if (safe.Length > 0) { sb.Append(safe); onToken?.Invoke(safe); }
+                if (filter.Stopped) break;
+            }
+            var tail = filter.Flush();
+            if (tail.Length > 0) { sb.Append(tail); onToken?.Invoke(tail); }
+            return CleanUp(sb.ToString());
+        }
+
+        private static AiResult Fail(string msg)
+        {
+            LastError = msg;
+            return new AiResult { Text = msg, Failed = true };
+        }
+
+        private static string Describe(Exception ex)
+        {
+            if (IsBackendFailure(ex)) { _backendFailure = BackendHelp(ex); return _backendFailure; }
+            var all = ex.ToString();
+            var msg = "(generation failed)\n  " + Root(ex);
+            if (all.IndexOf("NoKvSlot", StringComparison.OrdinalIgnoreCase) >= 0 || all.IndexOf("decode", StringComparison.OrdinalIgnoreCase) >= 0)
+                msg += "\n  The context window is full - raise contextSize in config\\ai.json.";
+            return msg + "\n  Details: data\\ai-error.log";
+        }
+
+        private static async Task<AiResult> RunAsync(IList<ChatTurn> turns, int maxTokens, float temperature, Action<string> onToken,
+            CancellationToken ct, string modelName, float repeatPenalty, string[] extraStops)
+        {
+            try { await Gate.WaitAsync(ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return Fail("(cancelled)"); }
+
+            try
+            {
+                var name = modelName ?? _loadedModelName ?? DefaultModel;
+                if (!EnsureLoaded(name, out var error)) return Fail(error);
+
+                maxTokens = Math.Max(16, Math.Min(maxTokens, _ctxSize / 2));
+                var fitted = Fit(turns, _ctxSize - maxTokens - 128);
+                var prompt = BuildPrompt(fitted);
+
+                var text = await GenerateAsync(prompt, maxTokens, temperature, repeatPenalty, onToken, ct, extraStops).ConfigureAwait(false);
+                LastError = null;
+                return new AiResult { Text = text, Failed = false };
+            }
+            catch (OperationCanceledException) { return Fail("(cancelled)"); }
+            catch (Exception ex)
+            {
+                LogError("generation", ex);
+                return Fail(Describe(ex));
+            }
+            finally { Gate.Release(); }
+        }
+
+        // ───────────────────────── public API ─────────────────────────
+        public async Task<AiResult> ChatDetailedAsync(IList<ChatTurn> turns, int maxTokens = 512, float temperature = 0.3f,
+            Action<string> onToken = null, CancellationToken ct = default, string modelName = null,
+            float repeatPenalty = 1.1f, string[] extraStops = null)
+        {
+            try
+            {
+                return await Task.Run(() => RunAsync(turns, maxTokens, temperature, onToken, ct, modelName, repeatPenalty, extraStops), ct)
+                                 .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return Fail("(cancelled)"); }
+        }
+
+        public async Task<string> AskRawAsync(string systemPrompt, string userMessage, int maxTokens = 900, float temperature = 0.2f)
+        {
+            var r = await ChatDetailedAsync(
+                new List<ChatTurn> { new ChatTurn("system", systemPrompt), new ChatTurn("user", userMessage) },
+                maxTokens, temperature).ConfigureAwait(false);
+            return r.Text;
+        }
+
+        private static void SyncChatWithHistory()
+        {
+            try
+            {
+                var newest = HistoryStore.Lo
