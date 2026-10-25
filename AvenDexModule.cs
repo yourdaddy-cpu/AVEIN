@@ -385,3 +385,262 @@ namespace AVEIN
                     case DexActionType.WebSearch: return await WebSearchAsync(a.Arg).ConfigureAwait(false);
                     case DexActionType.WriteFile: return WriteFile(a.Arg, a.Content);
                     case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll
+                                                                                     case DexActionType.EditFile: return EditFile(a.Arg, a.OldString, a.Content, a.ReplaceAll);
+                    case DexActionType.DeleteFile: return DeleteFile(a.Arg);
+                    case DexActionType.MoveFile: return MoveFile(a.Arg);
+                    case DexActionType.RunCmd: return await RunCmdAsync(a.Arg, ct).ConfigureAwait(false);
+                    case DexActionType.Git: return await RunCmdAsync("git " + a.Arg, ct).ConfigureAwait(false);
+                    case DexActionType.Done: return "[DONE]";
+                    default: return "[ERROR] Unknown action";
+                }
+            }
+            catch (Exception ex) { return "[ERROR] " + ex.Message; }
+        }
+
+        private string ReadFile(string path)
+        {
+            var full = Path.Combine(_root, path);
+            if (!File.Exists(full)) return "[ERROR] File not found: " + path;
+            var content = File.ReadAllText(full);
+            _readFiles.Add(path);
+            return content;
+        }
+
+        private string ListDir(string path)
+        {
+            var full = string.IsNullOrWhiteSpace(path) ? _root : Path.Combine(_root, path);
+            if (!Directory.Exists(full)) return "[ERROR] Dir not found: " + path;
+            var sb = new StringBuilder();
+            foreach (var d in Directory.GetDirectories(full)) sb.AppendLine("[dir] " + Path.GetFileName(d));
+            foreach (var f in Directory.GetFiles(full)) sb.AppendLine("[file] " + Path.GetFileName(f));
+            return sb.ToString();
+        }
+
+        private string Glob(string pattern)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(pattern)) pattern = "*.*";
+                var searchOption = pattern.Contains("**") ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                var cleanPattern = pattern.Replace("**/", "").Replace("**", "*");
+                
+                var files = Directory.GetFiles(_root, cleanPattern, searchOption)
+                    .Where(f => !IgnoredDirs.Any(d => f.Contains("\\" + d + "\\")))
+                    .Select(f => Path.GetRelativePath(_root, f))
+                    .Take(100);
+                return string.Join("\n", files);
+            }
+            catch (Exception ex) { return "[ERROR] Glob failed: " + ex.Message; }
+        }
+
+        private string Grep(string args)
+        {
+            try
+            {
+                var parts = args.Split(new[] { '@' }, 2);
+                var pattern = parts[0].Trim();
+                var fileFilter = parts.Length > 1 ? parts[1].Trim() : "*.*";
+
+                var sb = new StringBuilder();
+                var files = Directory.GetFiles(_root, fileFilter, SearchOption.AllDirectories)
+                    .Where(f => !IgnoredDirs.Any(d => f.Contains("\\" + d + "\\")) && !BinaryExt.Any(e => f.EndsWith(e, StringComparison.OrdinalIgnoreCase)))
+                    .Take(200);
+
+                foreach (var f in files)
+                {
+                    var lines = File.ReadAllLines(f);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        if (Regex.IsMatch(lines[i], pattern, RegexOptions.IgnoreCase))
+                        {
+                            sb.AppendLine($"{Path.GetRelativePath(_root, f)}:{i + 1}: {lines[i].Trim()}");
+                            if (sb.Length > 3000) return sb.ToString() + "\n... (truncated)";
+                        }
+                    }
+                }
+                return sb.Length == 0 ? "(no matches)" : sb.ToString();
+            }
+            catch (Exception ex) { return "[ERROR] Grep failed: " + ex.Message; }
+        }
+
+        private string UpdateTodos(string arg)
+        {
+            _todos.Clear();
+            foreach (var line in arg.Split('|'))
+            {
+                var l = line.Trim();
+                if (l.StartsWith("[x]")) _todos.Add(new TodoItem { State = 'x', Text = l.Substring(3).Trim() });
+                else if (l.StartsWith("[~]")) _todos.Add(new TodoItem { State = '~', Text = l.Substring(3).Trim() });
+                else _todos.Add(new TodoItem { State = ' ', Text = l });
+            }
+            return "Todos updated:\n" + TodoView();
+        }
+
+        private string WriteFile(string path, string content)
+        {
+            var full = Path.Combine(_root, path);
+            CheckpointFile(full);
+            Directory.CreateDirectory(Path.GetDirectoryName(full));
+            File.WriteAllText(full, content);
+            return $"Wrote {content.Length} bytes to {path}";
+        }
+
+        private string EditFile(string path, string oldStr, string newStr, bool all)
+        {
+            var full = Path.Combine(_root, path);
+            if (!File.Exists(full)) return "[ERROR] File not found";
+            var content = File.ReadAllText(full);
+            
+            if (!content.Contains(oldStr)) return "[ERROR] Search string not found in file. Make sure it matches exactly.";
+            
+            CheckpointFile(full);
+            if (all) content = content.Replace(oldStr, newStr);
+            else 
+            {
+                var idx = content.IndexOf(oldStr);
+                if (idx >= 0) content = content.Substring(0, idx) + newStr + content.Substring(idx + oldStr.Length);
+            }
+            File.WriteAllText(full, content);
+            return $"Edited {path}";
+        }
+
+        private string DeleteFile(string path)
+        {
+            var full = Path.Combine(_root, path);
+            if (!File.Exists(full)) return "[ERROR] File not found";
+            CheckpointFile(full);
+            File.Delete(full);
+            return "Deleted " + path;
+        }
+
+        private string MoveFile(string args)
+        {
+            var parts = args.Split('>');
+            if (parts.Length != 2) return "[ERROR] Use [MOVE:from>to]";
+            var src = Path.Combine(_root, parts[0].Trim());
+            var dst = Path.Combine(_root, parts[1].Trim());
+            if (!File.Exists(src)) return "[ERROR] Source not found";
+            CheckpointFile(src);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst));
+            if (File.Exists(dst)) File.Delete(dst);
+            File.Move(src, dst);
+            return $"Moved {parts[0].Trim()} to {parts[1].Trim()}";
+        }
+
+        private async Task<string> RunCmdAsync(string cmd, CancellationToken ct)
+        {
+            var psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+            {
+                WorkingDirectory = _root,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using (var p = Process.Start(psi))
+            {
+                var outStr = await p.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+                var errStr = await p.StandardError.ReadToEndAsync().ConfigureAwait(false);
+                p.WaitForExit();
+                return (outStr + "\n" + errStr).Trim();
+            }
+        }
+
+        private async Task<string> WebFetchAsync(string url)
+        {
+            var res = await Http.GetStringAsync(url).ConfigureAwait(false);
+            return res.Length > 3000 ? res.Substring(0, 3000) + "..." : res;
+        }
+
+        private async Task<string> WebSearchAsync(string query)
+        {
+            try
+            {
+                var html = await Http.GetStringAsync("https://html.duckduckgo.com/html/?q=" + Uri.EscapeDataString(query)).ConfigureAwait(false);
+                var matches = Regex.Matches(html, @"<a rel=""nofollow"" class=""result__a"" href=""([^""]+)"">(.*?)</a>", RegexOptions.Singleline);
+                var sb = new StringBuilder();
+                foreach (Match m in matches.Cast<Match>().Take(5))
+                {
+                    var title = Regex.Replace(m.Groups[2].Value, "<.*?>", "").Trim();
+                    var link = m.Groups[1].Value;
+                    sb.AppendLine($"{title}\n{link}\n");
+                }
+                return sb.Length == 0 ? "(no results found)" : sb.ToString();
+            }
+            catch (Exception ex) { return "[ERROR] Search failed: " + ex.Message; }
+        }
+
+        private void CheckpointFile(string fullPath)
+        {
+            if (_checkpoints.Any(c => c.FullPath == fullPath)) return;
+            var exists = File.Exists(fullPath);
+            _checkpoints.Add(new Checkpoint { FullPath = fullPath, Existed = exists, Data = exists ? File.ReadAllBytes(fullPath) : null });
+        }
+
+        private async Task<SlashResult> HandleSlashAsync(string text, CancellationToken ct)
+        {
+            var parts = text.Split(' ', 2);
+            var cmd = parts[0].ToLowerInvariant();
+            var arg = parts.Length > 1 ? parts[1].Trim() : "";
+
+            switch (cmd)
+            {
+                case "/help": return new SlashResult { Output = HelpText };
+                case "/clear":
+                    _turns.Clear(); _todos.Clear();
+                    return new SlashResult { Output = "Cleared." };
+                case "/todos": return new SlashResult { Output = TodoView() };
+                case "/undo": return new SlashResult { Output = Undo(string.IsNullOrEmpty(arg) ? 1 : int.Parse(arg)) };
+                case "/mode":
+                    if (Enum.TryParse<DexPermissionMode>(arg, true, out var m)) { PermissionMode = m; return new SlashResult { Output = "Mode set to " + m }; }
+                    return new SlashResult { Output = "Modes: default, accept, plan, auto" };
+                case "/status":
+                    return new SlashResult { Output = $"Tokens In: {_tokensIn}\nTokens Out: {_tokensOut}\nCalls: {_calls}" };
+                default:
+                    return new SlashResult { Output = "Unknown command: " + cmd };
+            }
+        }
+
+        private string TodoView()
+        {
+            if (_todos.Count == 0) return "(no tasks)";
+            return string.Join("\n", _todos.Select(t => $"[{t.State}] {t.Text}"));
+        }
+
+        private string BuildTree()
+        {
+            var sb = new StringBuilder();
+            foreach (var f in Directory.GetFiles(_root, "*.*", SearchOption.AllDirectories))
+            {
+                if (IgnoredDirs.Any(d => f.Contains("\\" + d + "\\"))) continue;
+                if (BinaryExt.Any(e => f.EndsWith(e, StringComparison.OrdinalIgnoreCase))) continue;
+                sb.AppendLine(Path.GetRelativePath(_root, f));
+            }
+            return sb.ToString();
+        }
+
+        private string ReadMemory()
+        {
+            var p = Path.Combine(_root, "AVEIN.md");
+            return File.Exists(p) ? File.ReadAllText(p) : "";
+        }
+
+        private string AppendMemory(string note)
+        {
+            var p = Path.Combine(_root, "AVEIN.md");
+            File.AppendAllText(p, "\n- " + note);
+            return "Added to memory: " + note;
+        }
+
+        private static string Rel(string fullPath) => Path.GetFileName(fullPath);
+        
+        private static string Trunc(string s, int len)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Length <= len ? s : s.Substring(0, len) + "...";
+        }
+
+        private void Report(string msg) => StepReport?.Invoke(msg);
+        private void LogEx(Exception ex) => ActivityLogged?.Invoke("[ERROR] " + ex.Message);
+    }
+                                                                 }
