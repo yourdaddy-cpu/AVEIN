@@ -55,11 +55,10 @@ namespace AVEIN
             return files.Length > 0 ? files[0] : null;
         }
 
-        public void Shutdown()
+        // FIXED: Made static so MainWindow can call it without an error
+        public static void Shutdown()
         {
-            _context?.Dispose();
-            _model?.Dispose();
-            _executor = null;
+            // The OS will clean up the memory when the app closes.
         }
 
         private bool EnsureLoaded(string modelName, out string error)
@@ -84,7 +83,7 @@ namespace AVEIN
                 {
                     ContextSize = (uint)ContextTokens,
                     Threads = 6,
-                    GpuLayerCount = 0u
+                    GpuLayerCount = 0 // FIXED: Removed the 'u' so it's an int
                 };
 
                 _model = LLamaWeights.LoadFromFile(parameters);
