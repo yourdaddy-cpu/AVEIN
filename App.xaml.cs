@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 
@@ -12,7 +15,17 @@ namespace AVEIN
         {
             base.OnStartup(e);
 
+            DispatcherUnhandledException += (s, ev) =>
+            {
+                LogCrash("UI", ev.Exception);
+                ev.Handled = true;
+                MessageBox.Show(ev.Exception.Message + "\n\nDetails: data\\crash.log", "AVEIN error");
+            };
+            AppDomain.CurrentDomain.UnhandledException += (s, ev) => LogCrash("Fatal", ev.ExceptionObject as Exception);
+            TaskScheduler.UnobservedTaskException += (s, ev) => { LogCrash("Task", ev.Exception); ev.SetObserved(); };
+
             Config = AppConfig.Load();
+
             var palette = ThemeManager.Load();
             ApplyPalette(palette);
 
@@ -20,6 +33,17 @@ namespace AVEIN
 
             var window = new MainWindow();
             window.Show();
+        }
+
+        private static void LogCrash(string kind, Exception ex)
+        {
+            try
+            {
+                var dir = Path.Combine(AppContext.BaseDirectory, "data");
+                Directory.CreateDirectory(dir);
+                File.AppendAllText(Path.Combine(dir, "crash.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {kind}: {ex}\n\n");
+            }
+            catch { }
         }
 
         public static void ApplyPalette(ThemePalette palette)
@@ -32,7 +56,6 @@ namespace AVEIN
             SetBrush(app, "AccentBrush", palette.Accent);
             SetBrush(app, "BorderBrush", palette.Border);
             SetBrush(app, "SidebarBackgroundBrush", palette.SidebarBackground);
-
             ThemeManager.Save(palette);
         }
 
