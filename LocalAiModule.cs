@@ -55,6 +55,13 @@ namespace AVEIN
             return files.Length > 0 ? files[0] : null;
         }
 
+        public void Shutdown()
+        {
+            _context?.Dispose();
+            _model?.Dispose();
+            _executor = null;
+        }
+
         private bool EnsureLoaded(string modelName, out string error)
         {
             error = null;
@@ -75,9 +82,9 @@ namespace AVEIN
 
                 var parameters = new ModelParams(path)
                 {
-                    ContextSize = ContextTokens,
+                    ContextSize = (uint)ContextTokens,
                     Threads = 6,
-                    GpuLayerCount = 0
+                    GpuLayerCount = 0u
                 };
 
                 _model = LLamaWeights.LoadFromFile(parameters);
