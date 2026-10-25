@@ -77,7 +77,7 @@ namespace AVEIN
                 {
                     ContextSize = ContextTokens,
                     Threads = 6,
-                    GpuLayerCount = 0 // Set to 20 if you want GPU
+                    GpuLayerCount = 0
                 };
 
                 _model = LLamaWeights.LoadFromFile(parameters);
@@ -180,8 +180,6 @@ namespace AVEIN
                 else if (lower.Contains("markdown") || lower.Contains("md file")) fileName = "note.md";
                 else fileName = "note.txt";
 
-                var contentPrompt = $"<|im_start|>system<|im_sep|>You are a file content generator. The user wants to create a file named '{fileName}'. Write ONLY the raw content that should go inside this file. Output ONLY the raw file content with no explanations, no greetings, no markdown fences. Use actual line breaks.<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
-
                 var generatedContent = await AskRawAsync("You are a helpful assistant.", userMessage, 800, 0.3f);
                 if (string.IsNullOrWhiteSpace(generatedContent)) generatedContent = "(The AI could not generate content for this file.)";
 
@@ -222,7 +220,6 @@ namespace AVEIN
                 else systemPrompt += " No search result was found. Say so honestly.";
             }
 
-            var prompt = $"<|im_start|>system<|im_sep|>{systemPrompt}<|im_end|><|im_start|>user<|im_sep|>{userMessage}<|im_end|><|im_start|>assistant<|im_sep|>";
             var answer = await AskRawAsync(systemPrompt, userMessage, deepThink ? 500 : 300, 0.3f);
 
             if (App.Config.IsModuleEnabled("web-search"))
