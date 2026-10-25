@@ -69,6 +69,9 @@ namespace AVEIN
             }
             App.Config.Save();
             App.Modules.ShutdownAll();
+                        App.Config.Save();
+            App.Modules.ShutdownAll();
+            LocalAiModule.Shutdown();
         }
     }
 }
